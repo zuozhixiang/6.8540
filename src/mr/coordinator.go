@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"encoding/json"
 	"errors"
 	"go.uber.org/zap"
 	"log"
@@ -45,6 +46,15 @@ func CheckTaskFinished(taskMap map[int]*Task) bool {
 	}
 	return true
 }
+func GetUnDone(taskMap map[int]*Task) map[int]*Task {
+	res := map[int]*Task{}
+	for _, task := range taskMap {
+		if !task.Done {
+			res[task.ID] = task
+		}
+	}
+	return res
+}
 
 func (c *Coordinator) getNextTask() *Task {
 	if c.Phase == MapPhase {
@@ -63,18 +73,9 @@ func (c *Coordinator) getNextTask() *Task {
 			c.AlloctedReduceTaskMap[res.ID] = res
 			return res
 		}
-		logger.Infof("enter wait")
-		c.Phase = WaitPhase
-		return &Task{Type: WaitTask}
-	} else if c.Phase == WaitPhase {
-		if CheckTaskFinished(c.AlloctedMapTaskMap) {
-			logger.Info("enter reduce")
-			c.Phase = ReducePhase
-			res := c.ReduceTask[0]
-			c.ReduceTask = c.ReduceTask[1:]
-			c.AlloctedReduceTaskMap[res.ID] = res
-			return res
-		}
+		x := GetUnDone(c.AlloctedMapTaskMap)
+		marshal, _ := json.Marshal(x)
+		logger.Infof("undo map task: %v, cnt: %v", string(marshal), len(x))
 		return &Task{Type: WaitTask}
 	} else if c.Phase == FinishPhase {
 		return &Task{Type: FinishedTask}
@@ -88,9 +89,14 @@ func (c *Coordinator) getNextTask() *Task {
 		if CheckTaskFinished(c.AlloctedReduceTaskMap) {
 			logger.Info("enter finish")
 			c.Phase = FinishPhase
+			return &Task{Type: FinishedTask}
 		}
-		return &Task{Type: FinishedTask}
+		x := GetUnDone(c.AlloctedReduceTaskMap)
+		marshal, _ := json.Marshal(x)
+		logger.Infof("undo reduce task: %v, cnt: %v", string(marshal), len(x))
+		return &Task{Type: WaitTask}
 	}
+	logger.Panicf("feihua")
 	return &Task{}
 }
 
@@ -168,7 +174,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		ReduceCnt:             nReduce,
 	}
 	// Your code here.
-
+	logger.Infof("Master Start")
 	c.server()
 
 	go c.dectorCrash()
@@ -177,29 +183,33 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 func (c *Coordinator) dectorCrash() {
 	for {
-		time.Sleep(time.Second * 2)
+		const t = 10
+		logger.Info("dectorCrash")
+		time.Sleep(2 * time.Second)
 		c.mu.Lock()
 		if c.Phase == FinishPhase { // 检查job 是否完成
 			c.mu.Unlock()
 			break
 		}
 		if c.Phase == MapPhase {
-			for _, task := range c.AlloctedMapTaskMap {
+			for _, task := range GetUnDone(c.AlloctedMapTaskMap) {
 				if task.StartTime != nil {
 					duration := time.Since(*task.StartTime)
-					if duration > 5*time.Second {
+					if duration > t*time.Second {
 						task.StartTime = nil
 						c.MapTask = append(c.MapTask, task)
+						logger.Warnf("map task timeout:%v", toJsonString(task))
 					}
 				}
 			}
 		} else if c.Phase == ReducePhase {
-			for _, task := range c.AlloctedReduceTaskMap {
+			for _, task := range GetUnDone(c.AlloctedReduceTaskMap) {
 				if task.StartTime != nil {
 					duration := time.Since(*task.StartTime)
-					if duration > 5*time.Second {
+					if duration > t*time.Second {
 						task.StartTime = nil
 						c.ReduceTask = append(c.ReduceTask, task)
+						logger.Warnf("reduce task timeout:%v", toJsonString(task))
 					}
 				}
 			}

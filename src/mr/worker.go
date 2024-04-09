@@ -59,6 +59,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 func doReduceTask(id int, files []string, reducef func(string, []string) string) error {
 	// mr-0-y, mr-1-y, mr-2-y, mr-3-y
+	logger.Infof("do reduce task: id[%v], files[%v]", id, files)
 	intermediate := []KeyValue{}
 	for _, filename := range files {
 		kva := []KeyValue{}
@@ -80,11 +81,10 @@ func doReduceTask(id int, files []string, reducef func(string, []string) string)
 		return intermediate[i].Key < intermediate[j].Key
 	})
 
-	file, err := os.Create(fmt.Sprintf("mr-out-%v", id))
+	ofile, err := os.Create(fmt.Sprintf("mr-out-%v", id))
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 	i := 0
 	for i < len(intermediate) {
 		j := i + 1
@@ -96,21 +96,19 @@ func doReduceTask(id int, files []string, reducef func(string, []string) string)
 			values = append(values, intermediate[k].Value)
 		}
 		output := reducef(intermediate[i].Key, values)
-
 		// this is the correct format for each line of Reduce output.
-		fmt.Fprintf(file, "%v %v\n", intermediate[i].Key, output)
-
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
 		i = j
 	}
-
+	ofile.Close()
 	return TellDone(id, ReduceTask)
 }
 
 func doMapTask(id int, fileName string, mapf func(string, string) []KeyValue, rCnt int) error {
 	// open file, then read content, call mapf(file, content)
 	pwd, err := os.Getwd()
-	logger.Infof(pwd)
 	file, err := os.Open(fileName)
+	defer file.Close()
 	if err != nil {
 		logger.Fatalf("can not open %v", fileName)
 	}
@@ -118,7 +116,7 @@ func doMapTask(id int, fileName string, mapf func(string, string) []KeyValue, rC
 	if err != nil {
 		logger.Fatalf("cannot read %v", fileName)
 	}
-	file.Close()
+
 	kva := mapf(fileName, string(content))
 
 	// key hash to reduce idx
@@ -130,7 +128,7 @@ func doMapTask(id int, fileName string, mapf func(string, string) []KeyValue, rC
 
 	for y, KVA := range reduceKVA {
 		temp, err := os.CreateTemp(pwd, "123")
-		defer temp.Close()
+
 		if err != nil {
 			return err
 		}
@@ -145,6 +143,7 @@ func doMapTask(id int, fileName string, mapf func(string, string) []KeyValue, rC
 			return err
 		}
 		temp.Write(marshal)
+		temp.Close()
 	}
 	return TellDone(id, MapTask)
 }
@@ -162,8 +161,11 @@ func AskTask() (id int, Type int, files []string, rCnt int) {
 	flag := call("Coordinator.AskTask", req, resp)
 	if flag {
 		return resp.TaskID, resp.Type, resp.Files, resp.ReduceCnt
+	} else {
+		logger.Errorf("ask task fail")
 	}
-	return 0, FinishedTask, nil, 0
+	return 0, WaitTask, nil, 0
+
 }
 
 func TellDone(id int, Type int) error {
@@ -192,7 +194,6 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	if err == nil {
 		return true
 	}
-
-	fmt.Println(err)
+	logger.Errorf("%v fail, err: %v", rpcname, err)
 	return false
 }
