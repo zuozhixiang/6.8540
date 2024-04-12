@@ -1,0 +1,4 @@
+=== RUN   TestBasic2
+Test: one client ...
+signal: interrupt
+FAIL	6.5840/kvsrv	1.361s

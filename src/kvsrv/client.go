@@ -4,7 +4,6 @@ import "6.5840/labrpc"
 import "crypto/rand"
 import "math/big"
 
-
 type Clerk struct {
 	server *labrpc.ClientEnd
 	// You will have to modify this struct.
@@ -21,6 +20,7 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.server = server
 	// You'll have to add code here.
+
 	return ck
 }
 
@@ -35,9 +35,18 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
-
-	// You will have to modify this function.
-	return ""
+	req := &GetArgs{Key: key}
+	resp := &GetReply{}
+	flag := ck.server.Call("KVServer.Get", req, resp)
+	for !flag {
+		//  logger.Debugf("Get, req: %v, resp: %v", toJson(req), toJson(resp))
+		flag = ck.server.Call("KVServer.Get", req, resp)
+		if flag {
+			//  logger.Debugf("Success Get, req: %v, resp: %v", toJson(req), toJson(resp))
+			break
+		}
+	}
+	return resp.Value
 }
 
 // shared by Put and Append.
@@ -50,7 +59,22 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	// You will have to modify this function.
-	return ""
+	id := nrand()
+	req := &PutAppendArgs{Key: key, Value: value, ID: id}
+	resp := &PutAppendReply{}
+	flag := ck.server.Call("KVServer."+op, req, resp)
+	for !flag {
+		//  logger.Debugf("%v fail, req: %v, resp: %v", op, toJson(req), toJson(resp))
+		flag = ck.server.Call("KVServer."+op, req, resp)
+		if flag {
+			//  logger.Debugf("Success %v, req: %v, resp: %v", op, toJson(req), toJson(resp))
+			break
+		}
+	}
+	if op == "Append" {
+		ck.Notify(id)
+	}
+	return resp.Value
 }
 
 func (ck *Clerk) Put(key string, value string) {
@@ -60,4 +84,12 @@ func (ck *Clerk) Put(key string, value string) {
 // Append value to key's value and return that value
 func (ck *Clerk) Append(key string, value string) string {
 	return ck.PutAppend(key, value, "Append")
+}
+
+func (ck *Clerk) Notify(id int64) {
+	req := &NotifyRequest{ID: id}
+	resp := &NotifyResponse{}
+	for !ck.server.Call("KVServer.Notify", req, resp) {
+		DPrintf("notify fail: %v", id)
+	}
 }

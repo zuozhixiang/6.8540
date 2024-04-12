@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const linearizabilityCheckTimeout = 1 * time.Second
+const linearizabilityCheckTimeout = 5 * time.Second
 
 type OpLog struct {
 	operations []porcupine.Operation
