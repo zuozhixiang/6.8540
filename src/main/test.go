@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"os"
+	"runtime"
 	"time"
 )
 
@@ -21,21 +20,23 @@ func (t Task) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 }
 
 func main() {
-	task := &Task{ID: 123}
+	someFunction()
+}
 
-	fmt.Println(*task)
-	logger, _ := zap.NewDevelopment()
-	slogger := logger.Sugar()
-	slogger.Infof("%+v", task)
-	getwd, err := os.Getwd()
-	if err != nil {
-		return
-	}
+func someFunction() {
+	printStackTrace()
+}
 
-	temp, err := os.CreateTemp(getwd, "1.txt")
-	if err != nil {
-		return
+func printStackTrace() {
+	pc := make([]uintptr, 10)
+	n := runtime.Callers(0, pc)
+	frames := runtime.CallersFrames(pc[:n])
+	for {
+		frame, more := frames.Next()
+		fmt.Printf("%s:%d +%#x\n", frame.File, frame.Line, frame.PC)
+
+		if !more {
+			break
+		}
 	}
-	os.Rename(temp.Name(), getwd+"/1.log")
-	defer temp.Close()
 }
