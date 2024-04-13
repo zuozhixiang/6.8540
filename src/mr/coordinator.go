@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"encoding/json"
 	"errors"
 	"go.uber.org/zap"
 	"log"
@@ -16,13 +15,17 @@ import (
 var logger *zap.SugaredLogger
 
 func init() {
-	logger1, _ := zap.NewDevelopment()
+	config := zap.NewDevelopmentConfig()
+	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	logger1, err := config.Build()
+	if err != nil {
+		return
+	}
 	logger = logger1.Sugar()
 }
 
 const (
 	MapPhase = iota
-	WaitPhase
 	ReducePhase
 	FinishPhase
 )
@@ -73,9 +76,9 @@ func (c *Coordinator) getNextTask() *Task {
 			c.AlloctedReduceTaskMap[res.ID] = res
 			return res
 		}
-		x := GetUnDone(c.AlloctedMapTaskMap)
-		marshal, _ := json.Marshal(x)
-		logger.Infof("undo map task: %v, cnt: %v", string(marshal), len(x))
+		//x := GetUnDone(c.AlloctedMapTaskMap)
+		//marshal, _ := json.Marshal(x)
+		//logger.Infof("undo map task: %v, cnt: %v", string(marshal), len(x))
 		return &Task{Type: WaitTask}
 	} else if c.Phase == FinishPhase {
 		return &Task{Type: FinishedTask}
@@ -91,9 +94,9 @@ func (c *Coordinator) getNextTask() *Task {
 			c.Phase = FinishPhase
 			return &Task{Type: FinishedTask}
 		}
-		x := GetUnDone(c.AlloctedReduceTaskMap)
-		marshal, _ := json.Marshal(x)
-		logger.Infof("undo reduce task: %v, cnt: %v", string(marshal), len(x))
+		//x := GetUnDone(c.AlloctedReduceTaskMap)
+		//marshal, _ := json.Marshal(x)
+		//logger.Infof("undo reduce task: %v, cnt: %v", string(marshal), len(x))
 		return &Task{Type: WaitTask}
 	}
 	logger.Panicf("feihua")
@@ -111,7 +114,7 @@ func (c *Coordinator) AskTask(req *AskTaskRequest, resp *AskTaskResponse) error 
 	resp.Type = task.Type
 	resp.Files = task.Files
 	resp.ReduceCnt = c.ReduceCnt
-	logger.Infof("phase: %v, alllocate task: %s", c.Phase, toJsonString(task))
+	logger.Debugf("phase: %v, alllocate task: %s", c.Phase, toJsonString(task))
 	return nil
 }
 
