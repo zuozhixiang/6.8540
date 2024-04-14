@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	MinTimeOutElection = 1000
-	MaxTimeOutElection = 2000
+	MinTimeOutElection = 500
+	MaxTimeOutElection = 1000
 )
 
 // example RequestVote RPC arguments structure.
@@ -21,6 +21,13 @@ type RequestVoteArgs struct {
 	LastLogIndex int
 	LastLogTerm  int32
 }
+type Status int
+
+const (
+	Success Status = iota
+	OutDateTerm
+	NoMatch
+)
 
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
@@ -28,12 +35,13 @@ type RequestVoteReply struct {
 	// Your data here (3A).
 	Term        int32
 	VoteGranted bool
+	Status      Status
 }
 
 func (rf *Raft) CheckTermAndUpdate(term int32) bool {
 	// if term >= currentTerm , then update, return true
 	if term >= rf.CurrentTerm {
-		rf.CurrentTerm = term
+		atomic.StoreInt32(&rf.CurrentTerm, term)
 		return true
 	}
 	return false
@@ -41,31 +49,38 @@ func (rf *Raft) CheckTermAndUpdate(term int32) bool {
 
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
+	resp.VoteGranted = false
+	curTerm := rf.getTerm()
+	resp.Term = curTerm
 	if rf.killed() {
+		return
+	}
+	if curTerm > req.Term {
+		resp.Status = OutDateTerm
 		return
 	}
 	rf.Lock()
 	defer rf.Unlock()
-	resp.VoteGranted = false
-	resp.Term = rf.CurrentTerm
-	if rf.CheckTermNewer(req.Term) {
+	if req.Term > curTerm {
+		rf.setTerm(req.Term)
 		rf.VotedFor = NoneVote
 		rf.TransFollower()
 	}
-	if !rf.CheckTermAndUpdate(req.Term) {
-		rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] recive vote request, req: %v", req.CandidateID, rf.me, toJson(req))
-		return
-	}
 	// candidate term is bigger, and votedfor no one,  candidate's logs at least >= self's logs
 	if rf.VotedFor == NoneVote || rf.VotedFor == req.CandidateID {
-		if rf.Logs.GetLastIndex() <= req.LastLogIndex && rf.Logs.GetLastTerm() <= req.LastLogTerm {
-			rf.VotedFor = req.CandidateID // todo, receive leader's heartbeat , clear VotedFor
-			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v]-> success vote  recive request  req: %v", req.CandidateID, rf.me, toJson(req))
+		lastIndex := rf.Logs.GetLastIndex()
+		lastTerm := rf.Logs.GetLastTerm()
+		// 要求， 候选人的日志比自己的新， 要么任期 比我大， 要么任期相同，小于比我大
+		if lastTerm < req.LastLogTerm || (lastTerm == req.LastLogTerm && lastIndex <= req.LastLogIndex) {
+			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v]-> success req: %v", req.CandidateID, rf.me, toJson(req))
 			resp.VoteGranted = true
+			rf.VotedFor = req.CandidateID // todo, receive leader's heartbeat , clear VotedFor
 			rf.TransFollower()
+		} else {
+			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v]-> fail log old req: %v", req.CandidateID, rf.me, toJson(req))
 		}
 	} else {
-		rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail voted for [S%v] req: %v", req.CandidateID, rf.VotedFor, rf.me, toJson(req))
+		rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail votedFor:[S%v] req: %v", req.CandidateID, rf.VotedFor, rf.me, toJson(req))
 	}
 }
 
@@ -96,65 +111,37 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 // capitalized all field names in structs passed over RPC, and
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
+
 func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestVoteReply, cnt *int32) {
-	req.ID = getID()
-	for rf.killed() == false {
-		rf.debugf(SendVote, "->[S%v] vote req: %v", server, toJson(req))
+	for !rf.killed() {
 		ok := rf.peers[server].Call("Raft.RequestVote", req, resp)
-		if rf.killed() {
-			rf.infof("killed")
+		if rf.killed() || !rf.isCandidate() || rf.getTerm() != req.Term {
 			return
 		}
-		if rf.GetTerm() != req.Term {
-			rf.infof("outdated message: %v", req.ID)
-			return
+		if ok {
+			break
 		}
-		if !rf.isCandidate() {
-			rf.infof("not candidate, ID:%v", req.ID)
-			return
-		}
-		if !ok {
-			rf.debugf(SendVote, "->[S%v] vote fail, req: %v", server, toJson(req))
-		} else {
-			rf.Lock()
-			defer rf.Unlock()
-			if resp.VoteGranted {
-				if !rf.isCandidate() {
-					return
-				}
-				atomic.AddInt32(cnt, 1)
-				count := atomic.LoadInt32(cnt)
-				if count > int32(rf.n/2) {
-					rf.debugf(SendVote, "->[S%v] vote success become leader, voted req: %v, resp: %v",
-						server, toJson(req), toJson(resp))
-					rf.TransLeader()
-					return
-				}
-				rf.debugf(SendVote, "->[S%v] voted success, voted req: %v, resp: %v",
-					server, toJson(req), toJson(resp))
-				return
-			} else {
-				if rf.CheckTermNewer(resp.Term) {
-					rf.debugf(SendVote, "->[S%v] vote success, but term old not and become follower req: %v, resp: %v",
-						server, toJson(req), toJson(resp))
-					rf.TransFollower()
-					return
-				}
-				rf.debugf(SendVote, "->[S%v] voted success, but not req: %v, resp: %v",
-					server, toJson(req), toJson(resp))
+	}
+
+	rf.Lock()
+	defer rf.Unlock()
+	if resp.VoteGranted {
+		atomic.AddInt32(cnt, 1)
+		if atomic.LoadInt32(cnt) > int32(rf.n/2) {
+			if rf.isLeader() {
 				return
 			}
-			return
+			if rf.isCandidate() {
+				rf.TransLeader()
+			}
+		}
+	} else {
+		if resp.Status == OutDateTerm {
+			rf.VotedFor = NoneVote
+			rf.setTerm(max(rf.CurrentTerm, resp.Term))
+			rf.TransFollower()
 		}
 	}
-}
-
-func (rf *Raft) CheckTermNewer(term int32) bool {
-	if term > rf.CurrentTerm {
-		rf.CurrentTerm = term
-		return true
-	}
-	return false
 }
 
 func (rf *Raft) isLeader() bool {
@@ -176,6 +163,7 @@ func (rf *Raft) isFollower() bool {
 }
 
 func (rf *Raft) TransLeader() {
+	rf.VotedFor = NoneVote
 	atomic.StoreInt32(&rf.State, Leader)
 	for i := 0; i < rf.n; i++ {
 		rf.NextIndex[i] = rf.Logs.GetLastIndex() + 1
@@ -185,8 +173,8 @@ func (rf *Raft) TransLeader() {
 }
 
 func (rf *Raft) TransFollower() {
-	rf.RestartTimeOutElection()
 	atomic.StoreInt32(&rf.State, Follower)
+	rf.RestartTimeOutElection()
 }
 
 func (rf *Raft) StartElection() {
@@ -204,14 +192,16 @@ func (rf *Raft) SendAllRequestVote() {
 	term := rf.CurrentTerm
 	cnt := int32(1)
 	for i, _ := range rf.peers {
-		resp := RequestVoteReply{}
 		if i != rf.me {
-			go rf.sendRequestVote(i, &RequestVoteArgs{
+			resp := RequestVoteReply{}
+			req := RequestVoteArgs{
+				ID:           getID(),
 				Term:         term,
 				CandidateID:  id,
 				LastLogIndex: lastIndex,
 				LastLogTerm:  lastTerm,
-			}, &resp, &cnt)
+			}
+			go rf.sendRequestVote(i, &req, &resp, &cnt)
 		}
 	}
 }
@@ -225,6 +215,7 @@ func (rf *Raft) checkTimeoutElection() {
 			diff := GetNow() - rf.TimeOutElection
 			if diff >= 0 {
 				// start leader election
+				rf.debugf(LeaderElection, "timeout: %vms", rf.TimeOutDuration)
 				rf.StartElection()
 			}
 		}

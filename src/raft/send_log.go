@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	HeartBeatMinTime = 150
+	HeartBeatMinTime = 80
 )
 
 type AppendEntriesRequest struct {
@@ -15,89 +15,120 @@ type AppendEntriesRequest struct {
 	LeaderID     int
 	PrevLogIndex int
 	PrevLogTerm  int32
-	Entries      []*LogEntry
+	Entries      []LogEntry
 	LeaderCommit int
 }
 type AppendEntriesResponse struct {
-	Term    int32
-	Success bool
+	Term                  int32
+	Success               bool
+	Status                Status
+	ConflictingTerm       int32
+	FirstConflictingIndex int
 }
 
 func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResponse) {
+	resp.Success = false
+	curTerm := rf.getTerm()
+	resp.Term = curTerm
 	if rf.killed() {
 		return
 	}
-	rf.Lock()
-	defer rf.Unlock()
-	resp.Success = false
-	resp.Term = rf.CurrentTerm
-	if !rf.CheckTermAndUpdate(req.Term) {
+	if curTerm > req.Term {
 		rf.debugf(ReciveData, "Leader[S%v]-> fail, leader term is old req: %v, resp: %v",
 			req.LeaderID, toJson(req), toJson(resp))
+		resp.Status = OutDateTerm
 		return
 	}
-	rf.VotedFor = NoneVote
-	rf.TransFollower()
-	if len(req.Entries) == 0 {
-		// heartbeat
-		resp.Success = true
-		rf.debugf(ReciveHeart, "Leader[S%v]-> success req: %v, resp: %v", req.LeaderID, toJson(req), toJson(resp))
-		return
+	if rf.isCandidate() {
+		rf.VotedFor = NoneVote
+		rf.TransFollower()
 	}
+	rf.Lock()
+	defer rf.Unlock()
 	// todo, look paper
 	if req.PrevLogIndex > rf.Logs.GetLastIndex() || rf.Logs.GetEntry(req.PrevLogIndex).Term != req.PrevLogTerm {
 		if req.PrevLogIndex > rf.Logs.GetLastIndex() {
-			rf.debugf(ReciveData, "Leader[S%v]-> fail, PrevIndex: %v, lastIndex: %v", req.LeaderID, rf.Logs.GetLastTerm())
+			rf.debugf(ReciveData, "Leader[S%v]-> fail, PrevIndex: %v, lastIndex: %v, state: %v", req.LeaderID, req.PrevLogIndex,
+				rf.Logs.GetLastTerm(), toJson(rf))
+			resp.Status = NoMatch
+			resp.ConflictingTerm = -1
+			resp.FirstConflictingIndex = len(rf.Logs.LogData)
 		} else {
-			rf.debugf(ReciveData, "Leader[S%v]-> fail, not match PrevIndex: %v, %v!=%v ", req.LeaderID,
-				req.PrevLogIndex, rf.Logs.GetEntry(req.PrevLogIndex).Term, req.PrevLogTerm)
+			rf.debugf(ReciveData, "Leader[S%v]-> fail, not match PrevIndex: %v, %v!=%v, state: %v", req.LeaderID,
+				req.PrevLogIndex, rf.Logs.GetEntry(req.PrevLogIndex).Term, req.PrevLogTerm, toJson(rf))
+			resp.Status = NoMatch
+			resp.ConflictingTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
+			ret := req.PrevLogIndex - 1
+			for rf.Logs.GetEntry(ret).Term == resp.ConflictingTerm {
+				ret--
+			}
+			resp.FirstConflictingIndex = ret + 1
 		}
 	} else {
 		resp.Success = true
-		rf.debugf(ReciveData, "Leader[S%v]-> success, req: %v", req.LeaderID, toJson(req))
-		//
-		rf.Logs.Delete(req.PrevLogIndex + 1)
-		rf.Logs.AppendLogEntrys(req.Entries)
-		if req.LeaderCommit > rf.CommitIndex {
-			rf.CommitIndex = min(req.LeaderCommit, rf.Logs.GetLastIndex())
+		rf.debugf(ReciveData, "Leader[S%v]-> success, req: %v, state: %v", req.LeaderID, toJson(req), toJson(rf))
+		lastIndex := rf.Logs.GetLastIndex()
+		for i, entry := range req.Entries {
+			x := i + 1 + req.PrevLogIndex
+			if x <= lastIndex && rf.Logs.GetEntry(x).Term != entry.Term || x > lastIndex {
+				// 这一条以及之后的都截断
+				rf.Logs.Delete(i + 1 + req.PrevLogIndex)
+				rf.Logs.AppendLogEntrys(req.Entries[i:])
+				break
+			}
 		}
+		rf.VotedFor = NoneVote
+		rf.TransFollower()
+		rf.CommitIndex = min(req.LeaderCommit, req.PrevLogIndex+len(req.Entries))
 	}
 }
 
 func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendEntriesResponse, nextIndex int) {
-	req.ID = getID()
 	for !rf.killed() {
-		rf.debugf(SendData, "->[S%v] , req: %v", server, toJson(req))
 		ok := rf.peers[server].Call("Raft.AppendEntries", req, resp)
-		if rf.killed() {
-			rf.infof("be killed")
-			break
-		}
-		if rf.GetTerm() != req.Term {
-			rf.infof("outdated message: %v", req.ID)
+		if rf.killed() || !rf.isLeader() || rf.getTerm() != req.Term {
 			return
 		}
-		if !ok {
-			rf.debugf(SendData, "fail, ->[S%v], req: %v", server, toJson(req))
-		} else {
-			rf.Lock()
-			if resp.Success {
-				rf.debugf(SendData, "success, ->[S%v], req: %v, resp: %v", server, toJson(req), toJson(resp))
-				rf.NextIndex[server] = nextIndex
-				rf.MatchIndex[server] = nextIndex - 1
-				// 尝试更新commitId
-				rf.TryUpdateCommitID()
-				rf.Unlock()
-				return
+		if ok {
+			break
+		}
+	}
+	rf.Lock()
+	defer rf.Unlock()
+	if resp.Success {
+		rf.NextIndex[server] = max(rf.NextIndex[server], nextIndex)
+		rf.MatchIndex[server] = max(rf.MatchIndex[server], nextIndex-1)
+		rf.TryUpdateCommitID()
+		rf.debugf(SendData, "success, ->[S%v], req: %v, resp: %v, state: %v",
+			server, toJson(req), toJson(resp), toJson(rf))
+	} else {
+		if resp.Status == OutDateTerm {
+			rf.debugf(SendData, "fail to Follower  ->[S%v], req: %v, resp: %v", server, toJson(req), toJson(resp))
+			rf.VotedFor = NoneVote
+			rf.TransFollower()
+			rf.setTerm(resp.Term)
+		} else if resp.Status == NoMatch {
+			// No match
+			rf.debugf(SendData, "fail not match ->[S%v], notmatchIndex: %v, Term: %v", server, req.PrevLogIndex, req.PrevLogTerm)
+			if resp.ConflictingTerm == -1 {
+				rf.NextIndex[server] = resp.FirstConflictingIndex
 			} else {
-				rf.debugf(SendData, "not match ->[S%v], notmatchIndex: %v, Term: %v", server, req.PrevLogIndex, req.PrevLogTerm)
-				rf.NextIndex[server] -= 1
-				rf.MatchIndex[server] = rf.NextIndex[server] - 1
-				req.PrevLogIndex = rf.MatchIndex[server]
-				req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
-				req.Entries = rf.Logs.GetSlice(rf.NextIndex[server], rf.Logs.GetLastIndex())
-				rf.Unlock()
+				last := rf.Logs.GetTermMaxIndex(resp.ConflictingTerm)
+				if last != -1 {
+					rf.NextIndex[server] = min(resp.FirstConflictingIndex, last)
+				} else {
+					if resp.FirstConflictingIndex > rf.NextIndex[server] {
+						logger.Error(resp.FirstConflictingIndex, rf.NextIndex[server])
+					}
+					rf.NextIndex[server] = resp.FirstConflictingIndex
+				}
 			}
+			rf.MatchIndex[server] = rf.NextIndex[server] - 1
+			req.PrevLogIndex = rf.MatchIndex[server]
+			req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
+			nextIndex = rf.Logs.GetLastIndex() + 1
+			req.Entries = rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1)
+			go rf.SendLogData(server, req, resp, nextIndex)
 		}
 	}
 }
@@ -105,17 +136,18 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 func (rf *Raft) TryUpdateCommitID() {
 	n := rf.Logs.GetLastIndex()
 	old_commitIndex := rf.CommitIndex
-	for N := old_commitIndex + 1; N <= n; N++ {
-		n := rf.n
-		cnt := 0
-		for _, x := range rf.MatchIndex {
-			if x >= N && rf.Logs.GetEntry(N).Term == rf.CurrentTerm {
+	for N := n; N > old_commitIndex && rf.Logs.GetEntry(N).Term == rf.CurrentTerm; N-- {
+		cnt := 1
+		for i, x := range rf.MatchIndex {
+			if i == rf.me {
+				continue
+			}
+			if x >= N {
 				cnt++
 			}
 		}
-		if cnt > n/2 {
+		if cnt > rf.n/2 {
 			rf.CommitIndex = N
-		} else {
 			break
 		}
 	}
@@ -124,52 +156,11 @@ func (rf *Raft) TryUpdateCommitID() {
 	}
 }
 
-func (rf *Raft) SendHeartBeat(server int, req *AppendEntriesRequest, resp *AppendEntriesResponse) {
-	req.ID = getID()
-	for !rf.killed() {
-		rf.debugf(SendHeart, "->[S%v] heartbeat, req: %v", server, toJson(req))
-		ok := rf.peers[server].Call("Raft.AppendEntries", req, resp)
-		if rf.killed() {
-			rf.infof("be killed")
-			break
-		}
-		if rf.GetTerm() != req.Term {
-			rf.infof("outdated message: %v", req.ID)
-			return
-		}
-		if !rf.isLeader() {
-			rf.infof("not leader")
-			return
-		}
-		if !ok {
-			rf.debugf(SendHeart, "->[S%v] heartbeat, fail req: %v", server, toJson(req))
-		} else {
-			rf.Lock()
-			defer rf.Unlock()
-			if resp.Success {
-				rf.debugf(SendHeart, "->[S%v] heartbeat success, id: %v", server, req.ID)
-				return
-			} else {
-				if rf.CheckTermNewer(resp.Term) {
-					rf.debugf(SendHeart, "->[S%v] heartbeat success, but fail become follower, req: %v, resp: %v",
-						server, toJson(req), toJson(resp))
-					rf.TransFollower()
-					return
-				} else {
-					rf.warnf("->[S%v] heartbeat success, but fail others reasonreq: %v, resp: %v",
-						server, toJson(req), toJson(resp))
-					return
-				}
-			}
-			return
-		}
-	}
-}
-
 func (rf *Raft) SendAllHeartBeat() {
 	for i, _ := range rf.peers {
 		if i != rf.me {
 			req := AppendEntriesRequest{
+				ID:           getID(),
 				Term:         rf.CurrentTerm,
 				LeaderID:     rf.me,
 				Entries:      nil,
@@ -178,12 +169,11 @@ func (rf *Raft) SendAllHeartBeat() {
 			}
 			req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term // todo
 			resp := AppendEntriesResponse{}
+			nextIdx := rf.Logs.GetLastIndex() + 1
 			if rf.NextIndex[i] <= rf.Logs.GetLastIndex() {
 				req.Entries = rf.Logs.GetSlice(rf.NextIndex[i], rf.Logs.GetLastIndex())
-				go rf.SendLogData(i, &req, &resp, rf.Logs.GetLastIndex()+1)
-			} else {
-				go rf.SendHeartBeat(i, &req, &resp)
 			}
+			go rf.SendLogData(i, &req, &resp, nextIdx)
 		}
 	}
 }
@@ -195,7 +185,7 @@ func (rf *Raft) sendHeartBeat() {
 			rf.SendAllHeartBeat()
 		}
 		rf.Unlock()
-		ms := HeartBeatMinTime + (rand.Int63() % 151)
+		ms := HeartBeatMinTime + (rand.Int63() % 100)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }

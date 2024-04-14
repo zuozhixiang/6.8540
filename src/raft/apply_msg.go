@@ -26,21 +26,25 @@ type ApplyMsg struct {
 	SnapshotIndex int
 }
 
-func (rf *Raft) ApplyMessage(applyCh chan ApplyMsg) {
-	for !rf.killed() {
-		ms := HeartBeatMinTime + (rand.Int63() % 151)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
-		rf.Lock()
-		for rf.CommitIndex > rf.LastApplied {
-			rf.LastApplied++
-			msg := ApplyMsg{
-				CommandValid: true,
-				Command:      rf.Logs.GetEntry(rf.LastApplied),
-				CommandIndex: rf.LastApplied,
-			}
-			applyCh <- msg
-			rf.debugf(ApplyMess, "msg: %v", toJson(msg))
+func (rf *Raft) apply() {
+	rf.Lock()
+	defer rf.Unlock()
+	for rf.CommitIndex > rf.LastApplied {
+		rf.LastApplied++
+		msg := ApplyMsg{
+			CommandValid: true,
+			Command:      rf.Logs.GetEntry(rf.LastApplied).Command,
+			CommandIndex: rf.LastApplied,
 		}
-		rf.Unlock()
+		rf.applyChan <- msg
+		rf.debugf(ApplyMess, "msg: %v", toJson(msg))
+	}
+}
+
+func (rf *Raft) ApplyMessage() {
+	for !rf.killed() {
+		ms := 30 + (rand.Int63() % 101)
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		rf.apply()
 	}
 }

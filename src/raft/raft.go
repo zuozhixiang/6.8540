@@ -42,6 +42,7 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 	n         int
+	applyChan chan ApplyMsg
 
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
@@ -80,9 +81,12 @@ func (rf *Raft) GetState() (int, bool) {
 	return int(term), isleader
 }
 
-func (rf *Raft) GetTerm() int32 {
+func (rf *Raft) getTerm() int32 {
 	term := atomic.LoadInt32(&rf.CurrentTerm)
 	return term
+}
+func (rf *Raft) setTerm(term int32) {
+	atomic.StoreInt32(&rf.CurrentTerm, term)
 }
 
 // the service says it has created a snapshot that has
@@ -118,6 +122,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.Logs.AppendLogEntry(command, rf.CurrentTerm)
 	index = rf.Logs.GetLastIndex()
 	term = int(rf.Logs.GetLastTerm())
+	rf.debugf(ArriveMsg, "arrvie new msg: %v", command)
 	rf.SendAllHeartBeat()
 	return index, term, true
 }
@@ -153,6 +158,7 @@ func (rf *Raft) killed() bool {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
+	rf.applyChan = applyCh
 	rf.n = len(peers)
 	rf.peers = peers
 	rf.persister = persister
@@ -170,9 +176,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 	// start ticker goroutine to start elections
+	rf.infof("Start Run")
 	go rf.checkTimeoutElection()
 	go rf.sendHeartBeat()
-	go rf.infof("Start Run")
-	go rf.ApplyMessage(applyCh)
+	go rf.ApplyMessage()
 	return rf
 }

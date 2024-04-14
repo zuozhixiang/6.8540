@@ -446,7 +446,6 @@ func (cfg *config) checkOneLeader() int {
 				lastTermWithLeader = term
 			}
 		}
-
 		if len(leaders) != 0 {
 			return leaders[lastTermWithLeader][0]
 		}

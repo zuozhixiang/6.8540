@@ -1,7 +1,7 @@
 package raft
 
 type LogEntrys struct {
-	LogData []*LogEntry
+	LogData []LogEntry
 }
 type LogEntry struct {
 	Command interface{}
@@ -12,14 +12,17 @@ func (logs *LogEntrys) GetLastIndex() int {
 	return len(logs.LogData) - 1
 }
 
-func (logs *LogEntrys) GetEntry(idx int) *LogEntry {
+func (logs *LogEntrys) GetEntry(idx int) LogEntry {
 	if idx < 0 || idx > logs.GetLastIndex() {
-		logger.Errorf("非法idx: %v, last: %v", idx, logs.GetLastIndex())
-		return nil
+		logger.Errorf(" 非法idx: %v, last: %v", idx, logs.GetLastIndex())
+		return LogEntry{}
 	}
 	return logs.LogData[idx]
 }
-func (logs *LogEntrys) AppendLogEntrys(data []*LogEntry) {
+func (logs *LogEntrys) AppendLogEntrys(data []LogEntry) {
+	if len(data) == 0 {
+		return
+	}
 	logs.LogData = append(logs.LogData, data...)
 }
 
@@ -28,7 +31,7 @@ func (logs *LogEntrys) GetLastTerm() int32 {
 }
 
 func (logs *LogEntrys) AppendLogEntry(command interface{}, term int32) {
-	logs.LogData = append(logs.LogData, &LogEntry{
+	logs.LogData = append(logs.LogData, LogEntry{
 		Command: command,
 		Term:    term,
 	})
@@ -38,14 +41,14 @@ func (logs *LogEntrys) Delete(idx int) {
 	if idx > logs.GetLastIndex() {
 		return
 	}
-	if idx <= 1 {
-		logger.Errorf("delete 非法, idx: %v", idx)
+	if idx < 1 {
+		// logger.Errorf("delete 非法, idx: %v", idx)
 		return
 	}
 	logs.LogData = logs.LogData[:idx]
 }
 
-func (logs *LogEntrys) GetSlice(left, right int) []*LogEntry {
+func (logs *LogEntrys) GetSlice(left, right int) []LogEntry {
 	if left < 1 || right > logs.GetLastIndex() || left > right {
 		logger.Errorf("非法范围, left: %v, right: %v, last: %v", left, right, logs.GetLastIndex())
 		return nil
@@ -53,8 +56,19 @@ func (logs *LogEntrys) GetSlice(left, right int) []*LogEntry {
 	return logs.LogData[left : right+1]
 }
 
+func (logs *LogEntrys) GetTermMaxIndex(term int32) int {
+	idx := -1
+	n := logs.GetLastIndex()
+	for i := 1; i <= n; i++ {
+		if logs.LogData[i].Term == term {
+			idx = i
+		}
+	}
+	return idx
+}
+
 func MakeEmptyLog() *LogEntrys {
-	res := &LogEntrys{LogData: []*LogEntry{{
+	res := &LogEntrys{LogData: []LogEntry{{
 		Command: nil,
 		Term:    -1,
 	}}}

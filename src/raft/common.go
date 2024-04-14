@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const Debug = false
+
 var logger *zap.SugaredLogger
 
 func init() {
@@ -26,8 +28,6 @@ func init() {
 	}
 	logger = logger1.Sugar()
 }
-
-const Debug = false
 
 var stateMap = map[int32]string{
 	Follower:  "Follower",
@@ -50,6 +50,9 @@ const (
 	ApplyMess Method = "ApplyMsg"
 
 	UpdateCommitIndex Method = "UpdateCommitIndex"
+	LeaderElection    Method = "LeaderElection"
+
+	ArriveMsg Method = "ArriveMsg"
 )
 
 const path = `/Users/zuozhixiang/zzx/6.5840/`
