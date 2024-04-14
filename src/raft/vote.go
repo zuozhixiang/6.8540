@@ -19,7 +19,7 @@ type RequestVoteArgs struct {
 	Term         int32
 	CandidateID  int
 	LastLogIndex int
-	LastLogTerm  int
+	LastLogTerm  int32
 }
 
 // example RequestVote RPC reply structure.
@@ -53,19 +53,19 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 		rf.TransFollower()
 	}
 	if !rf.CheckTermAndUpdate(req.Term) {
-		rf.debugf("Candidate[S%v]-> S[%v] recive vote request, req: %v", req.CandidateID, rf.me, toJson(req))
+		rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] recive vote request, req: %v", req.CandidateID, rf.me, toJson(req))
 		return
 	}
 	// candidate term is bigger, and votedfor no one,  candidate's logs at least >= self's logs
 	if rf.VotedFor == NoneVote || rf.VotedFor == req.CandidateID {
 		if rf.Logs.GetLastIndex() <= req.LastLogIndex && rf.Logs.GetLastTerm() <= req.LastLogTerm {
 			rf.VotedFor = req.CandidateID // todo, receive leader's heartbeat , clear VotedFor
-			rf.debugf("Candidate[S%v]-> S[%v]-> success vote  recive request  req: %v", req.CandidateID, rf.me, toJson(req))
+			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v]-> success vote  recive request  req: %v", req.CandidateID, rf.me, toJson(req))
 			resp.VoteGranted = true
 			rf.TransFollower()
 		}
 	} else {
-		rf.debugf("Candidate[S%v]-> S[%v] fail voted for [S%v] req: %v", req.CandidateID, rf.VotedFor, rf.me, toJson(req))
+		rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail voted for [S%v] req: %v", req.CandidateID, rf.VotedFor, rf.me, toJson(req))
 	}
 }
 
@@ -99,25 +99,22 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestVoteReply, cnt *int32) {
 	req.ID = getID()
 	for rf.killed() == false {
-		rf.debugf("->[S%v] vote req: %v", server, toJson(req))
+		rf.debugf(SendVote, "->[S%v] vote req: %v", server, toJson(req))
 		ok := rf.peers[server].Call("Raft.RequestVote", req, resp)
 		if rf.killed() {
 			rf.infof("killed")
 			return
 		}
-		rf.Lock()
-		if rf.CurrentTerm != req.Term {
-			rf.Unlock()
-			rf.infof("outdate message: %v", req.ID)
+		if rf.GetTerm() != req.Term {
+			rf.infof("outdated message: %v", req.ID)
 			return
 		}
-		rf.Unlock()
 		if !rf.isCandidate() {
 			rf.infof("not candidate, ID:%v", req.ID)
 			return
 		}
 		if !ok {
-			rf.debugf("->[S%v] vote fail, req: %v", server, toJson(req))
+			rf.debugf(SendVote, "->[S%v] vote fail, req: %v", server, toJson(req))
 		} else {
 			rf.Lock()
 			defer rf.Unlock()
@@ -128,22 +125,22 @@ func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestV
 				atomic.AddInt32(cnt, 1)
 				count := atomic.LoadInt32(cnt)
 				if count > int32(rf.n/2) {
-					rf.debugf("->[S%v] vote success become leader, voted req: %v, resp: %v",
+					rf.debugf(SendVote, "->[S%v] vote success become leader, voted req: %v, resp: %v",
 						server, toJson(req), toJson(resp))
 					rf.TransLeader()
 					return
 				}
-				rf.debugf("->[S%v] voted success, voted req: %v, resp: %v",
+				rf.debugf(SendVote, "->[S%v] voted success, voted req: %v, resp: %v",
 					server, toJson(req), toJson(resp))
 				return
 			} else {
 				if rf.CheckTermNewer(resp.Term) {
-					rf.debugf("->[S%v] vote success, but term old not and become follower req: %v, resp: %v",
+					rf.debugf(SendVote, "->[S%v] vote success, but term old not and become follower req: %v, resp: %v",
 						server, toJson(req), toJson(resp))
 					rf.TransFollower()
 					return
 				}
-				rf.debugf("->[S%v] voted success, but not req: %v, resp: %v",
+				rf.debugf(SendVote, "->[S%v] voted success, but not req: %v, resp: %v",
 					server, toJson(req), toJson(resp))
 				return
 			}
@@ -180,6 +177,10 @@ func (rf *Raft) isFollower() bool {
 
 func (rf *Raft) TransLeader() {
 	atomic.StoreInt32(&rf.State, Leader)
+	for i := 0; i < rf.n; i++ {
+		rf.NextIndex[i] = rf.Logs.GetLastIndex() + 1
+		rf.MatchIndex[i] = 0
+	}
 	rf.SendAllHeartBeat()
 }
 
@@ -194,11 +195,6 @@ func (rf *Raft) StartElection() {
 	atomic.StoreInt32(&rf.State, Candidate)
 	rf.RestartTimeOutElection()
 	rf.SendAllRequestVote()
-}
-
-func (rf *Raft) SendOneRequestVote() {
-	rf.Lock()
-	defer rf.Unlock()
 }
 
 func (rf *Raft) SendAllRequestVote() {

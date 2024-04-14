@@ -1,5 +1,10 @@
 package raft
 
+import (
+	"math/rand"
+	"time"
+)
+
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
 // tester) on the same server, via the applyCh passed to Make(). set
@@ -19,4 +24,23 @@ type ApplyMsg struct {
 	Snapshot      []byte
 	SnapshotTerm  int
 	SnapshotIndex int
+}
+
+func (rf *Raft) ApplyMessage(applyCh chan ApplyMsg) {
+	for !rf.killed() {
+		ms := HeartBeatMinTime + (rand.Int63() % 151)
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		rf.Lock()
+		for rf.CommitIndex > rf.LastApplied {
+			rf.LastApplied++
+			msg := ApplyMsg{
+				CommandValid: true,
+				Command:      rf.Logs.GetEntry(rf.LastApplied),
+				CommandIndex: rf.LastApplied,
+			}
+			applyCh <- msg
+			rf.debugf(ApplyMess, "msg: %v", toJson(msg))
+		}
+		rf.Unlock()
+	}
 }

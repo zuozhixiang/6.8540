@@ -80,6 +80,11 @@ func (rf *Raft) GetState() (int, bool) {
 	return int(term), isleader
 }
 
+func (rf *Raft) GetTerm() int32 {
+	term := atomic.LoadInt32(&rf.CurrentTerm)
+	return term
+}
+
 // the service says it has created a snapshot that has
 // all info up to and including index. this means the
 // service no longer needs the log through (and including)
@@ -104,11 +109,17 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
-	isLeader := true
-
+	if !rf.isLeader() {
+		return index, term, false
+	}
+	rf.Lock()
+	defer rf.Unlock()
 	// Your code here (3B).
-
-	return index, term, isLeader
+	rf.Logs.AppendLogEntry(command, rf.CurrentTerm)
+	index = rf.Logs.GetLastIndex()
+	term = int(rf.Logs.GetLastTerm())
+	rf.SendAllHeartBeat()
+	return index, term, true
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -154,9 +165,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.CommitIndex = 0
 	rf.LastApplied = 0
 	rf.NextIndex = make([]int, rf.n)
-	for i := 0; i < rf.n; i++ {
-		rf.NextIndex[i] = rf.Logs.GetLastIndex() + 1
-	}
 	rf.MatchIndex = make([]int, rf.n)
 	rf.RestartTimeOutElection()
 	// initialize from state persisted before a crash
@@ -164,6 +172,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start ticker goroutine to start elections
 	go rf.checkTimeoutElection()
 	go rf.sendHeartBeat()
-	rf.infof("Start Run")
+	go rf.infof("Start Run")
+	go rf.ApplyMessage(applyCh)
 	return rf
 }
