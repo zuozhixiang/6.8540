@@ -42,7 +42,7 @@ func (logs *LogEntrys) Delete(idx int) {
 		return
 	}
 	if idx < 1 {
-		// logger.Errorf("delete 非法, idx: %v", idx)
+		logger.Errorf("delete 非法, idx: %v", idx)
 		return
 	}
 	logs.LogData = logs.LogData[:idx]

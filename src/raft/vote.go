@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	MinTimeOutElection = 500
-	MaxTimeOutElection = 1000
+	MinTimeOutElection = 1000
+	MaxTimeOutElection = 1500
 )
 
 // example RequestVote RPC arguments structure.
@@ -178,7 +178,7 @@ func (rf *Raft) TransFollower() {
 }
 
 func (rf *Raft) StartElection() {
-	rf.CurrentTerm++
+	rf.setTerm(rf.CurrentTerm + 1)
 	rf.VotedFor = rf.me
 	atomic.StoreInt32(&rf.State, Candidate)
 	rf.RestartTimeOutElection()

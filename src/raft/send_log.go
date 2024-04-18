@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	HeartBeatMinTime = 80
+	HeartBeatMinTime = 100
 )
 
 type AppendEntriesRequest struct {
@@ -70,7 +70,7 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 		lastIndex := rf.Logs.GetLastIndex()
 		for i, entry := range req.Entries {
 			x := i + 1 + req.PrevLogIndex
-			if x <= lastIndex && rf.Logs.GetEntry(x).Term != entry.Term || x > lastIndex {
+			if (x <= lastIndex && rf.Logs.GetEntry(x).Term != entry.Term) || (x > lastIndex) {
 				// 这一条以及之后的都截断
 				rf.Logs.Delete(i + 1 + req.PrevLogIndex)
 				rf.Logs.AppendLogEntrys(req.Entries[i:])
@@ -115,7 +115,10 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 			} else {
 				last := rf.Logs.GetTermMaxIndex(resp.ConflictingTerm)
 				if last != -1 {
-					rf.NextIndex[server] = min(resp.FirstConflictingIndex, last)
+					if resp.FirstConflictingIndex < last {
+						logger.Errorf("FirstConflictingIndex: %v, last: %v", resp.FirstConflictingIndex, last)
+					}
+					rf.NextIndex[server] = last
 				} else {
 					if resp.FirstConflictingIndex > rf.NextIndex[server] {
 						logger.Error(resp.FirstConflictingIndex, rf.NextIndex[server])
@@ -123,6 +126,7 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 					rf.NextIndex[server] = resp.FirstConflictingIndex
 				}
 			}
+			// rf.NextIndex[server] = max(rf.NextIndex[server]/2, 1)
 			rf.MatchIndex[server] = rf.NextIndex[server] - 1
 			req.PrevLogIndex = rf.MatchIndex[server]
 			req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
@@ -159,19 +163,23 @@ func (rf *Raft) TryUpdateCommitID() {
 func (rf *Raft) SendAllHeartBeat() {
 	for i, _ := range rf.peers {
 		if i != rf.me {
+			nextIndex := rf.NextIndex[i]
 			req := AppendEntriesRequest{
 				ID:           getID(),
 				Term:         rf.CurrentTerm,
 				LeaderID:     rf.me,
 				Entries:      nil,
 				LeaderCommit: rf.CommitIndex,
-				PrevLogIndex: rf.MatchIndex[i], // todo
+				PrevLogIndex: nextIndex - 1, // todo
 			}
 			req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term // todo
 			resp := AppendEntriesResponse{}
 			nextIdx := rf.Logs.GetLastIndex() + 1
-			if rf.NextIndex[i] <= rf.Logs.GetLastIndex() {
-				req.Entries = rf.Logs.GetSlice(rf.NextIndex[i], rf.Logs.GetLastIndex())
+			lastIndex := rf.Logs.GetLastIndex()
+			if rf.NextIndex[i] <= lastIndex {
+				entries := make([]LogEntry, lastIndex-nextIndex+1)
+				copy(entries, rf.Logs.GetSlice(rf.NextIndex[i], lastIndex))
+				req.Entries = entries
 			}
 			go rf.SendLogData(i, &req, &resp, nextIdx)
 		}
