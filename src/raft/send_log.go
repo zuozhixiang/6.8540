@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	HeartBeatMinTime = 100
+	HeartBeatMinTime = 80
 )
 
 type AppendEntriesRequest struct {
@@ -118,12 +118,12 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 					if resp.FirstConflictingIndex < last {
 						logger.Errorf("FirstConflictingIndex: %v, last: %v", resp.FirstConflictingIndex, last)
 					}
-					rf.NextIndex[server] = last
+					rf.NextIndex[server] = min(resp.FirstConflictingIndex, last)
 				} else {
 					if resp.FirstConflictingIndex > rf.NextIndex[server] {
 						logger.Error(resp.FirstConflictingIndex, rf.NextIndex[server])
 					}
-					rf.NextIndex[server] = resp.FirstConflictingIndex
+					rf.NextIndex[server] = min(resp.FirstConflictingIndex, rf.NextIndex[server])
 				}
 			}
 			// rf.NextIndex[server] = max(rf.NextIndex[server]/2, 1)
@@ -189,7 +189,7 @@ func (rf *Raft) SendAllHeartBeat() {
 func (rf *Raft) sendHeartBeat() {
 	for !rf.killed() {
 		rf.Lock()
-		if rf.State == Leader {
+		if rf.isLeader() {
 			rf.SendAllHeartBeat()
 		}
 		rf.Unlock()

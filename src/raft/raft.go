@@ -77,7 +77,7 @@ func (rf *Raft) GetState() (int, bool) {
 	defer rf.Unlock()
 
 	var term = rf.CurrentTerm
-	var isleader = rf.State == int32(Leader)
+	var isleader = rf.isLeader()
 	return int(term), isleader
 }
 

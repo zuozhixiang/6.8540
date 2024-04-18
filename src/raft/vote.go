@@ -211,7 +211,7 @@ func (rf *Raft) checkTimeoutElection() {
 		// Your code here (3A)
 		// Check if a leader election should be started.
 		rf.Lock()
-		if rf.State == Follower || rf.State == Candidate {
+		if rf.isFollower() || rf.isCandidate() {
 			diff := GetNow() - rf.TimeOutElection
 			if diff >= 0 {
 				// start leader election
