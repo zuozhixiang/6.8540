@@ -526,12 +526,12 @@ func TestBackup3B(t *testing.T) {
 	}
 
 	// now another partitioned leader and one follower
-	leader2 := cfg.checkOneLeader()
-	other := (leader1 + 2) % servers
+	leader2 := cfg.checkOneLeader()  // 3
+	other := (leader1 + 2) % servers // 2
 	if leader2 == other {
 		other = (leader2 + 1) % servers
 	}
-	cfg.disconnect(other)
+	cfg.disconnect(other) // 断开2， 2，3，4->3, 4
 
 	// lots more commands that won't commit
 	for i := 0; i < 50; i++ {
@@ -543,10 +543,10 @@ func TestBackup3B(t *testing.T) {
 	// bring original leader back to life,
 	for i := 0; i < servers; i++ {
 		cfg.disconnect(i)
-	}
-	cfg.connect((leader1 + 0) % servers)
-	cfg.connect((leader1 + 1) % servers)
-	cfg.connect(other)
+	} // 3,4
+	cfg.connect((leader1 + 0) % servers) // 0
+	cfg.connect((leader1 + 1) % servers) // 1
+	cfg.connect(other)                   // 2
 
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {

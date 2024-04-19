@@ -6,6 +6,6 @@ do
 
     current_time=`date`
     echo ${current_time}
-    grep FAIL a.log
-    sleep 140
+    ag FAIL a.log
+    sleep 50
 done

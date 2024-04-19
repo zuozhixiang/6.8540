@@ -8,7 +8,7 @@ import (
 
 const (
 	MinTimeOutElection = 700
-	MaxTimeOutElection = 1500
+	MaxTimeOutElection = 1200
 )
 
 // example RequestVote RPC arguments structure.
@@ -27,6 +27,7 @@ const (
 	Success Status = iota
 	OutDateTerm
 	NoMatch
+	OldLog
 )
 
 // example RequestVote RPC reply structure.
@@ -47,9 +48,11 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 	rf.Lock()
 	defer rf.Unlock()
 	curTerm := rf.CurrentTerm
-	resp.Term = curTerm
 	if curTerm > req.Term {
 		resp.Status = OutDateTerm
+		resp.Term = curTerm
+		rf.debugf(ReciveVote, "Candidate[S%d]->[S%d] fail, old term: %v, self: %v", req.CandidateID,
+			rf.me, req.Term, curTerm)
 		return
 	}
 
@@ -68,8 +71,11 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 			resp.VoteGranted = true
 			rf.VotedFor = req.CandidateID // todo, receive leader's heartbeat , clear VotedFor
 			rf.TransFollower()
+			rf.RestartTimeOutElection()
 		} else {
 			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail log old req: %v", req.CandidateID, rf.me, toJson(req))
+			// todo
+			resp.Status = OldLog
 		}
 	} else {
 		rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail votedFor:[S%v] req: %v", req.CandidateID, rf.VotedFor, rf.me, toJson(req))
@@ -133,9 +139,14 @@ func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestV
 		}
 	} else {
 		if resp.Status == OutDateTerm {
-			rf.VotedFor = NoneVote
-			rf.CurrentTerm = max(rf.CurrentTerm, resp.Term)
-			rf.TransFollower()
+			if resp.Term > rf.CurrentTerm {
+				rf.TransFollower()
+				rf.VotedFor = NoneVote
+				rf.RestartTimeOutElection()
+				rf.CurrentTerm = resp.Term
+			}
+		} else if resp.Status == OldLog {
+
 		}
 	}
 }
@@ -152,7 +163,7 @@ func (rf *Raft) TransLeader() {
 
 func (rf *Raft) TransFollower() {
 	rf.State = Follower
-	rf.RestartTimeOutElection()
+	rf.LeaderID = -1
 }
 
 func (rf *Raft) StartElection() {

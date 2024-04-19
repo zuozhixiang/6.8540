@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const Debug = false
+const Debug = true
 
 var logger *zap.SugaredLogger
 

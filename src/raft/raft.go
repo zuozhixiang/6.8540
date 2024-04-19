@@ -60,6 +60,7 @@ type Raft struct {
 	State           int32
 	TimeOutElection int64
 	TimeOutDuration int64
+	LeaderID        int
 }
 
 func (rf *Raft) Lock() {
@@ -115,7 +116,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index = rf.Logs.GetLastIndex()
 	term = int(rf.Logs.GetLastTerm())
 	rf.debugf(ArriveMsg, "arrvie new msg: %v", command)
-	rf.SendAllHeartBeat()
+	// rf.SendAllHeartBeat()
 	return index, term, true
 }
 
@@ -157,8 +158,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (3A, 3B, 3C).
+	rf.LeaderID = -1
 	rf.CurrentTerm = 0
 	rf.TransFollower()
+	rf.RestartTimeOutElection()
 	rf.Logs = MakeEmptyLog()
 	rf.CommitIndex = 0
 	rf.LastApplied = 0
