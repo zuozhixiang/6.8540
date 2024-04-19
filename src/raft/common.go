@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const Debug = true
+const Debug = false
 
 var logger *zap.SugaredLogger
 
@@ -55,7 +55,7 @@ const (
 	ArriveMsg Method = "ArriveMsg"
 )
 
-const path = `/Users/zuozhixiang/zzx/6.5840/`
+const path = `/Users/bytedance/zzx/6.8540/`
 const Len = len(path)
 
 func (rf *Raft) debugf(meth Method, format string, a ...interface{}) {

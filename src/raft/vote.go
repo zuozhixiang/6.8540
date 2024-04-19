@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	MinTimeOutElection = 700
+	MinTimeOutElection = 600
 	MaxTimeOutElection = 1200
 )
 

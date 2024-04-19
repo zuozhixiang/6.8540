@@ -116,7 +116,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index = rf.Logs.GetLastIndex()
 	term = int(rf.Logs.GetLastTerm())
 	rf.debugf(ArriveMsg, "arrvie new msg: %v", command)
-	// rf.SendAllHeartBeat()
+	rf.SendAllHeartBeat()
 	return index, term, true
 }
 

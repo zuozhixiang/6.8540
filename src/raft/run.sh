@@ -8,7 +8,7 @@ do
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
     echo "test ${i} ${current_time}"
     echo "test ${i} ${current_time}" >> a.log
-    go test -run TestBackup3B >> a.log
+    go test -run 3B >> a.log
     fail_count=$(ag FAIL a.log | wc -l)
     if [ ${fail_count} -gt 0 ]
     then

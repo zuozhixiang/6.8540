@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	HeartBeatMinTime = 100
+	HeartBeatMinTime = 80
 )
 
 type AppendEntriesRequest struct {
