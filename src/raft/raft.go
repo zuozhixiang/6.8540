@@ -77,16 +77,8 @@ func (rf *Raft) GetState() (int, bool) {
 	defer rf.Unlock()
 
 	var term = rf.CurrentTerm
-	var isleader = rf.isLeader()
+	var isleader = rf.State == Leader
 	return int(term), isleader
-}
-
-func (rf *Raft) getTerm() int32 {
-	term := atomic.LoadInt32(&rf.CurrentTerm)
-	return term
-}
-func (rf *Raft) setTerm(term int32) {
-	atomic.StoreInt32(&rf.CurrentTerm, term)
 }
 
 // the service says it has created a snapshot that has
@@ -113,11 +105,11 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
-	if !rf.isLeader() {
-		return index, term, false
-	}
 	rf.Lock()
 	defer rf.Unlock()
+	if rf.State != Leader {
+		return index, term, false
+	}
 	// Your code here (3B).
 	rf.Logs.AppendLogEntry(command, rf.CurrentTerm)
 	index = rf.Logs.GetLastIndex()

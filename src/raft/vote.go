@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	MinTimeOutElection = 1000
+	MinTimeOutElection = 700
 	MaxTimeOutElection = 1500
 )
 
@@ -38,31 +38,23 @@ type RequestVoteReply struct {
 	Status      Status
 }
 
-func (rf *Raft) CheckTermAndUpdate(term int32) bool {
-	// if term >= currentTerm , then update, return true
-	if term >= rf.CurrentTerm {
-		atomic.StoreInt32(&rf.CurrentTerm, term)
-		return true
-	}
-	return false
-}
-
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
-	resp.VoteGranted = false
-	curTerm := rf.getTerm()
-	resp.Term = curTerm
 	if rf.killed() {
 		return
 	}
+	resp.VoteGranted = false
+	rf.Lock()
+	defer rf.Unlock()
+	curTerm := rf.CurrentTerm
+	resp.Term = curTerm
 	if curTerm > req.Term {
 		resp.Status = OutDateTerm
 		return
 	}
-	rf.Lock()
-	defer rf.Unlock()
+
 	if req.Term > curTerm {
-		rf.setTerm(req.Term)
+		rf.CurrentTerm = req.Term
 		rf.VotedFor = NoneVote
 		rf.TransFollower()
 	}
@@ -72,12 +64,12 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 		lastTerm := rf.Logs.GetLastTerm()
 		// 要求， 候选人的日志比自己的新， 要么任期 比我大， 要么任期相同，小于比我大
 		if lastTerm < req.LastLogTerm || (lastTerm == req.LastLogTerm && lastIndex <= req.LastLogIndex) {
-			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v]-> success req: %v", req.CandidateID, rf.me, toJson(req))
+			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] success req: %v", req.CandidateID, rf.me, toJson(req))
 			resp.VoteGranted = true
 			rf.VotedFor = req.CandidateID // todo, receive leader's heartbeat , clear VotedFor
 			rf.TransFollower()
 		} else {
-			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v]-> fail log old req: %v", req.CandidateID, rf.me, toJson(req))
+			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail log old req: %v", req.CandidateID, rf.me, toJson(req))
 		}
 	} else {
 		rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail votedFor:[S%v] req: %v", req.CandidateID, rf.VotedFor, rf.me, toJson(req))
@@ -113,58 +105,44 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 // the struct itself.
 
 func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestVoteReply, cnt *int32) {
+
 	for !rf.killed() {
 		ok := rf.peers[server].Call("Raft.RequestVote", req, resp)
-		if rf.killed() || !rf.isCandidate() || rf.getTerm() != req.Term {
+		rf.Lock()
+		if rf.killed() || rf.State != Candidate || rf.CurrentTerm != req.Term {
+			rf.Unlock()
 			return
 		}
+		rf.Unlock()
 		if ok {
 			break
 		}
 	}
-
 	rf.Lock()
 	defer rf.Unlock()
+	rf.debugf(SendVote, "[S%v]->[S%v], req: %v", rf.me, server, toJson(req))
 	if resp.VoteGranted {
 		atomic.AddInt32(cnt, 1)
 		if atomic.LoadInt32(cnt) > int32(rf.n/2) {
-			if rf.isLeader() {
+			if rf.State == Leader {
 				return
 			}
-			if rf.isCandidate() {
+			if rf.State == Candidate {
 				rf.TransLeader()
 			}
 		}
 	} else {
 		if resp.Status == OutDateTerm {
 			rf.VotedFor = NoneVote
-			rf.setTerm(max(rf.CurrentTerm, resp.Term))
+			rf.CurrentTerm = max(rf.CurrentTerm, resp.Term)
 			rf.TransFollower()
 		}
 	}
 }
 
-func (rf *Raft) isLeader() bool {
-	state := atomic.LoadInt32(&rf.State)
-	ret := state == Leader
-	return ret
-}
-
-func (rf *Raft) isCandidate() bool {
-	state := atomic.LoadInt32(&rf.State)
-	ret := state == Candidate
-	return ret
-}
-
-func (rf *Raft) isFollower() bool {
-	state := atomic.LoadInt32(&rf.State)
-	ret := state == Follower
-	return ret
-}
-
 func (rf *Raft) TransLeader() {
 	rf.VotedFor = NoneVote
-	atomic.StoreInt32(&rf.State, Leader)
+	rf.State = Leader
 	for i := 0; i < rf.n; i++ {
 		rf.NextIndex[i] = rf.Logs.GetLastIndex() + 1
 		rf.MatchIndex[i] = 0
@@ -173,14 +151,14 @@ func (rf *Raft) TransLeader() {
 }
 
 func (rf *Raft) TransFollower() {
-	atomic.StoreInt32(&rf.State, Follower)
+	rf.State = Follower
 	rf.RestartTimeOutElection()
 }
 
 func (rf *Raft) StartElection() {
-	rf.setTerm(rf.CurrentTerm + 1)
+	rf.CurrentTerm += 1
 	rf.VotedFor = rf.me
-	atomic.StoreInt32(&rf.State, Candidate)
+	rf.State = Candidate
 	rf.RestartTimeOutElection()
 	rf.SendAllRequestVote()
 }
@@ -211,7 +189,7 @@ func (rf *Raft) checkTimeoutElection() {
 		// Your code here (3A)
 		// Check if a leader election should be started.
 		rf.Lock()
-		if rf.isFollower() || rf.isCandidate() {
+		if rf.State == Candidate || rf.State == Follower {
 			diff := GetNow() - rf.TimeOutElection
 			if diff >= 0 {
 				// start leader election

@@ -28,23 +28,23 @@ type AppendEntriesResponse struct {
 
 func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResponse) {
 	resp.Success = false
-	curTerm := rf.getTerm()
-	resp.Term = curTerm
 	if rf.killed() {
 		return
 	}
+	rf.Lock()
+	defer rf.Unlock()
+	curTerm := rf.CurrentTerm
+	resp.Term = curTerm
 	if curTerm > req.Term {
 		rf.debugf(ReciveData, "Leader[S%v]-> fail, leader term is old req: %v, resp: %v",
 			req.LeaderID, toJson(req), toJson(resp))
 		resp.Status = OutDateTerm
 		return
 	}
-	if rf.isCandidate() {
+	if rf.State == Candidate {
 		rf.VotedFor = NoneVote
 		rf.TransFollower()
 	}
-	rf.Lock()
-	defer rf.Unlock()
 	// todo, look paper
 	if req.PrevLogIndex > rf.Logs.GetLastIndex() || rf.Logs.GetEntry(req.PrevLogIndex).Term != req.PrevLogTerm {
 		if req.PrevLogIndex > rf.Logs.GetLastIndex() {
@@ -86,9 +86,12 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendEntriesResponse, nextIndex int) {
 	for !rf.killed() {
 		ok := rf.peers[server].Call("Raft.AppendEntries", req, resp)
-		if rf.killed() || !rf.isLeader() || rf.getTerm() != req.Term {
+		rf.Lock()
+		if rf.killed() || rf.State != Leader || rf.CurrentTerm != req.Term {
+			rf.Unlock()
 			return
 		}
+		rf.Unlock()
 		if ok {
 			break
 		}
@@ -106,33 +109,37 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 			rf.debugf(SendData, "fail to Follower  ->[S%v], req: %v, resp: %v", server, toJson(req), toJson(resp))
 			rf.VotedFor = NoneVote
 			rf.TransFollower()
-			rf.setTerm(resp.Term)
+			rf.CurrentTerm = max(rf.CurrentTerm, resp.Term)
 		} else if resp.Status == NoMatch {
 			// No match
 			rf.debugf(SendData, "fail not match ->[S%v], notmatchIndex: %v, Term: %v", server, req.PrevLogIndex, req.PrevLogTerm)
 			if resp.ConflictingTerm == -1 {
 				rf.NextIndex[server] = resp.FirstConflictingIndex
 			} else {
-				last := rf.Logs.GetTermMaxIndex(resp.ConflictingTerm)
-				if last != -1 {
-					if resp.FirstConflictingIndex < last {
-						logger.Errorf("FirstConflictingIndex: %v, last: %v", resp.FirstConflictingIndex, last)
-					}
-					rf.NextIndex[server] = min(resp.FirstConflictingIndex, last)
-				} else {
-					if resp.FirstConflictingIndex > rf.NextIndex[server] {
-						logger.Error(resp.FirstConflictingIndex, rf.NextIndex[server])
-					}
-					rf.NextIndex[server] = min(resp.FirstConflictingIndex, rf.NextIndex[server])
-				}
+				//last := rf.Logs.GetTermMaxIndex(resp.ConflictingTerm)
+				//if last != -1 {
+				//	if resp.FirstConflictingIndex < last {
+				//		logger.Errorf("FirstConflictingIndex: %v, last: %v", resp.FirstConflictingIndex, last)
+				//	}
+				//	rf.NextIndex[server] = min(resp.FirstConflictingIndex, last)
+				//} else {
+				//	if resp.FirstConflictingIndex > rf.NextIndex[server] {
+				//		logger.Error(resp.FirstConflictingIndex, rf.NextIndex[server])
+				//	}
+				//	rf.NextIndex[server] = min(resp.FirstConflictingIndex, rf.NextIndex[server])
+				//}
+				rf.NextIndex[server] = max(rf.NextIndex[server]/3, 1)
 			}
 			// rf.NextIndex[server] = max(rf.NextIndex[server]/2, 1)
 			rf.MatchIndex[server] = rf.NextIndex[server] - 1
 			req.PrevLogIndex = rf.MatchIndex[server]
 			req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
 			nextIndex = rf.Logs.GetLastIndex() + 1
-			req.Entries = rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1)
+			entries := make([]LogEntry, nextIndex-rf.NextIndex[server])
+			copy(entries, rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1))
+			req.Entries = entries
 			go rf.SendLogData(server, req, resp, nextIndex)
+			return
 		}
 	}
 }
@@ -189,7 +196,7 @@ func (rf *Raft) SendAllHeartBeat() {
 func (rf *Raft) sendHeartBeat() {
 	for !rf.killed() {
 		rf.Lock()
-		if rf.isLeader() {
+		if rf.State == Leader {
 			rf.SendAllHeartBeat()
 		}
 		rf.Unlock()
