@@ -113,6 +113,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 	// Your code here (3B).
 	rf.Logs.AppendLogEntry(command, rf.CurrentTerm)
+	rf.persist()
 	index = rf.Logs.GetLastIndex()
 	term = int(rf.Logs.GetLastTerm())
 	rf.debugf(ArriveMsg, "arrvie new msg: %v", command)
@@ -161,7 +162,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.LeaderID = -1
 	rf.CurrentTerm = 0
 	rf.TransFollower()
-	rf.RestartTimeOutElection()
 	rf.Logs = MakeEmptyLog()
 	rf.CommitIndex = 0
 	rf.LastApplied = 0
@@ -172,6 +172,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 	// start ticker goroutine to start elections
 	rf.infof("Start Run")
+	rf.infof("恢复, state: %v", toJson(rf))
 	go rf.checkTimeoutElection()
 	go rf.sendHeartBeat()
 	go rf.ApplyMessage()

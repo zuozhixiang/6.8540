@@ -30,6 +30,9 @@ func (rf *Raft) apply() {
 	rf.Lock()
 	defer rf.Unlock()
 	for rf.CommitIndex > rf.LastApplied {
+		if rf.killed() {
+			break
+		}
 		rf.LastApplied++
 		msg := ApplyMsg{
 			CommandValid: true,

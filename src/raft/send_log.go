@@ -41,10 +41,13 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 		resp.Status = OutDateTerm
 		return
 	}
+	needPersist := false
 	if rf.State == Candidate {
 		rf.VotedFor = NoneVote
 		rf.TransFollower()
+		rf.LeaderID = req.LeaderID
 		rf.RestartTimeOutElection()
+		needPersist = true
 	}
 	if req.PrevLogIndex > rf.Logs.GetLastIndex() || rf.Logs.GetEntry(req.PrevLogIndex).Term != req.PrevLogTerm {
 		if req.PrevLogIndex > rf.Logs.GetLastIndex() {
@@ -81,10 +84,15 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 			}
 		}
 		rf.LeaderID = req.LeaderID
-		rf.VotedFor = NoneVote
 		rf.TransFollower()
 		rf.RestartTimeOutElection()
-		rf.CommitIndex = min(req.LeaderCommit, req.PrevLogIndex+len(req.Entries))
+		if req.LeaderCommit > rf.CommitIndex {
+			rf.CommitIndex = min(req.LeaderCommit, req.PrevLogIndex+len(req.Entries))
+		}
+		needPersist = true
+	}
+	if needPersist {
+		rf.persist()
 	}
 }
 
@@ -116,7 +124,9 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 				rf.CurrentTerm = max(rf.CurrentTerm, resp.Term)
 				rf.VotedFor = NoneVote
 				rf.TransFollower()
+				rf.LeaderID = -1
 				rf.RestartTimeOutElection()
+				rf.persist()
 			}
 		} else if resp.Status == NoMatch {
 			// No match

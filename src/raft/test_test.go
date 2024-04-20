@@ -770,25 +770,34 @@ func TestPersist33C(t *testing.T) {
 	defer cfg.cleanup()
 
 	cfg.begin("Test (3C): partitioned leader and one follower crash, leader restarts")
-
+	logger.Infof("send 101")
 	cfg.one(101, 3, true)
 
 	leader := cfg.checkOneLeader()
+	logger.Infof("find leader: [S%v]", leader)
+
+	logger.Infof("disc [S%v]", (leader+2)%servers)
 	cfg.disconnect((leader + 2) % servers)
 
+	logger.Infof("send 102")
 	cfg.one(102, 2, true)
 
+	logger.Infof("crash [S%v][S%v], connect [S%v]", (leader+0)%servers, (leader+1)%servers, (leader+2)%servers)
 	cfg.crash1((leader + 0) % servers)
 	cfg.crash1((leader + 1) % servers)
 	cfg.connect((leader + 2) % servers)
+	logger.Infof("回复[S%d]", (leader+0)%servers)
 	cfg.start1((leader+0)%servers, cfg.applier)
 	cfg.connect((leader + 0) % servers)
 
+	logger.Infof("send 103")
 	cfg.one(103, 2, true)
 
+	logger.Infof("回复[S%d]", (leader+1)%servers)
 	cfg.start1((leader+1)%servers, cfg.applier)
 	cfg.connect((leader + 1) % servers)
 
+	logger.Infof("send 104")
 	cfg.one(104, servers, true)
 
 	cfg.end()

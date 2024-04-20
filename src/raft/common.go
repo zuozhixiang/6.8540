@@ -2,6 +2,7 @@ package raft
 
 import (
 	"encoding/json"
+	"fmt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/constraints"
@@ -11,7 +12,7 @@ import (
 	"time"
 )
 
-const Debug = false
+const Debug = true
 
 var logger *zap.SugaredLogger
 
@@ -49,8 +50,8 @@ const (
 
 	ApplyMess Method = "ApplyMsg"
 
-	UpdateCommitIndex Method = "UpdateCommitIndex"
-	LeaderElection    Method = "LeaderElection"
+	UpdateCommitIndex Method = "UpdateCommit"
+	LeaderElection    Method = "Election"
 
 	ArriveMsg Method = "ArriveMsg"
 )
@@ -61,11 +62,14 @@ const Len = len(path)
 func (rf *Raft) debugf(meth Method, format string, a ...interface{}) {
 	if Debug {
 		_, file, line, _ := runtime.Caller(1)
-		fmt := "%v:%v %v [S%v][%v][T%v] " + format
+		pos := fmt.Sprintf("%v:%v", file[Len:], line)
 		state := atomic.LoadInt32(&rf.State)
 		term := atomic.LoadInt32(&rf.CurrentTerm)
 		me := rf.me
-		x := []interface{}{file[Len:], line, meth, me, stateMap[state], term}
+		info := fmt.Sprintf("[S%v][%v][T%v]", me, stateMap[state], term)
+		fmt := "%-24v %-12v %-20v" + format
+
+		x := []interface{}{pos, meth, info}
 		x = append(x, a...)
 		logger.Debugf(fmt, x...)
 	}

@@ -55,11 +55,12 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 			rf.me, req.Term, curTerm)
 		return
 	}
-
+	needPersist := false
 	if req.Term > curTerm {
 		rf.CurrentTerm = req.Term
 		rf.VotedFor = NoneVote
 		rf.TransFollower()
+		needPersist = true
 	}
 	// candidate term is bigger, and votedfor no one,  candidate's logs at least >= self's logs
 	if rf.VotedFor == NoneVote || rf.VotedFor == req.CandidateID {
@@ -72,6 +73,7 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 			rf.VotedFor = req.CandidateID // todo, receive leader's heartbeat , clear VotedFor
 			rf.TransFollower()
 			rf.RestartTimeOutElection()
+			needPersist = true
 		} else {
 			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail log old req: %v", req.CandidateID, rf.me, toJson(req))
 			// todo
@@ -79,6 +81,9 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 		}
 	} else {
 		rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] fail votedFor:[S%v] req: %v", req.CandidateID, rf.VotedFor, rf.me, toJson(req))
+	}
+	if needPersist {
+		rf.persist()
 	}
 }
 
@@ -111,7 +116,6 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 // the struct itself.
 
 func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestVoteReply, cnt *int32) {
-
 	for !rf.killed() {
 		ok := rf.peers[server].Call("Raft.RequestVote", req, resp)
 		rf.Lock()
@@ -126,8 +130,9 @@ func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestV
 	}
 	rf.Lock()
 	defer rf.Unlock()
-	rf.debugf(SendVote, "[S%v]->[S%v], req: %v", rf.me, server, toJson(req))
+
 	if resp.VoteGranted {
+		rf.debugf(SendVote, "[S%v]->[S%v] success req: %v", rf.me, server, toJson(req))
 		atomic.AddInt32(cnt, 1)
 		if atomic.LoadInt32(cnt) > int32(rf.n/2) {
 			if rf.State == Leader {
@@ -135,38 +140,44 @@ func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestV
 			}
 			if rf.State == Candidate {
 				rf.TransLeader()
+				rf.debugf(SendVote, "[S%v]->[S%v] Come to Leader ReqID: %v", rf.me, server, req.ID)
 			}
 		}
 	} else {
 		if resp.Status == OutDateTerm {
+			rf.debugf(SendVote, "[S%v]->[S%v] fail OutDateTerm req: %v, resp: %v", rf.me, server, toJson(req), toJson(resp))
 			if resp.Term > rf.CurrentTerm {
 				rf.TransFollower()
+				rf.LeaderID = -1
 				rf.VotedFor = NoneVote
 				rf.RestartTimeOutElection()
 				rf.CurrentTerm = resp.Term
+				rf.persist()
 			}
 		} else if resp.Status == OldLog {
 			// todo delete
-			rf.VotedFor = NoneVote
-			rf.TransFollower()
-			rf.RestartTimeOutElection()
+			//rf.debugf(SendVote, "[S%v]->[S%v] fail OldLog req: %v, resp: %v", rf.me, server, toJson(req), toJson(resp))
+			//rf.VotedFor = NoneVote
+			//rf.TransFollower()
+			//rf.RestartTimeOutElection()
+			//rf.persist()
 		}
 	}
 }
 
 func (rf *Raft) TransLeader() {
-	rf.VotedFor = NoneVote
 	rf.State = Leader
+	rf.LeaderID = rf.me
 	for i := 0; i < rf.n; i++ {
 		rf.NextIndex[i] = rf.Logs.GetLastIndex() + 1
 		rf.MatchIndex[i] = 0
 	}
 	rf.SendAllHeartBeat()
+	rf.persist()
 }
 
 func (rf *Raft) TransFollower() {
 	rf.State = Follower
-	rf.LeaderID = -1
 }
 
 func (rf *Raft) StartElection() {
@@ -175,6 +186,7 @@ func (rf *Raft) StartElection() {
 	rf.State = Candidate
 	rf.RestartTimeOutElection()
 	rf.SendAllRequestVote()
+	rf.persist()
 }
 
 func (rf *Raft) SendAllRequestVote() {
