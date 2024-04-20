@@ -27,17 +27,22 @@ type AppendEntriesResponse struct {
 }
 
 func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResponse) {
-	resp.Success = false
+
+	m := ReciveData
+	if len(req.Entries) == 0 {
+		m = ReciveHeart
+	}
 	if rf.killed() {
 		return
 	}
 	rf.Lock()
 	defer rf.Unlock()
+	resp.Success = false
 	curTerm := rf.CurrentTerm
-	resp.Term = curTerm
 	if curTerm > req.Term {
-		rf.debugf(ReciveData, "Leader[S%v]-> fail, leader term is old req: %v, resp: %v",
+		rf.debugf(m, "Leader[S%v]-> fail, leader term is old req: %v, resp: %v",
 			req.LeaderID, toJson(req), toJson(resp))
+		resp.Term = curTerm
 		resp.Status = OutDateTerm
 		return
 	}
@@ -45,19 +50,26 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 	if rf.State == Candidate {
 		rf.VotedFor = NoneVote
 		rf.TransFollower()
-		rf.LeaderID = req.LeaderID
-		rf.RestartTimeOutElection()
 		needPersist = true
 	}
+	if req.Term > rf.CurrentTerm {
+		rf.VotedFor = NoneVote
+		rf.CurrentTerm = req.Term
+		rf.TransFollower()
+		rf.LeaderID = -1
+		needPersist = true
+	}
+	rf.RestartTimeOutElection()
+	rf.LeaderID = req.LeaderID
 	if req.PrevLogIndex > rf.Logs.GetLastIndex() || rf.Logs.GetEntry(req.PrevLogIndex).Term != req.PrevLogTerm {
 		if req.PrevLogIndex > rf.Logs.GetLastIndex() {
-			rf.debugf(ReciveData, "Leader[S%v]-> fail, PrevIndex: %v, lastIndex: %v, state: %v", req.LeaderID, req.PrevLogIndex,
+			rf.debugf(m, "Leader[S%v]-> fail, PrevIndex: %v, lastIndex: %v, state: %v", req.LeaderID, req.PrevLogIndex,
 				rf.Logs.GetLastTerm(), toJson(rf))
 			resp.Status = NoMatch
 			resp.ConflictingTerm = -1
 			resp.FirstConflictingIndex = len(rf.Logs.LogData)
 		} else {
-			rf.debugf(ReciveData, "Leader[S%v]-> fail, not match PrevIndex: %v, %v!=%v, state: %v", req.LeaderID,
+			rf.debugf(m, "Leader[S%v]-> fail, not match PrevIndex: %v, %v!=%v, state: %v", req.LeaderID,
 				req.PrevLogIndex, rf.Logs.GetEntry(req.PrevLogIndex).Term, req.PrevLogTerm, toJson(rf))
 			resp.Status = NoMatch
 			resp.ConflictingTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
@@ -69,7 +81,7 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 		}
 	} else {
 		resp.Success = true
-		rf.debugf(ReciveData, "Leader[S%v]-> success, req: %v, state: %v", req.LeaderID, toJson(req), toJson(rf))
+		rf.debugf(m, "Leader[S%v]-> success, req: %v, state: %v", req.LeaderID, toJson(req), toJson(rf))
 		lastIndex := rf.Logs.GetLastIndex()
 		for i, entry := range req.Entries {
 			x := i + 1 + req.PrevLogIndex
@@ -83,9 +95,7 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 				break
 			}
 		}
-		rf.LeaderID = req.LeaderID
-		rf.TransFollower()
-		rf.RestartTimeOutElection()
+		rf.TransFollower() // todo
 		if req.LeaderCommit > rf.CommitIndex {
 			rf.CommitIndex = min(req.LeaderCommit, req.PrevLogIndex+len(req.Entries))
 		}

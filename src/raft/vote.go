@@ -62,6 +62,7 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 		rf.TransFollower()
 		needPersist = true
 	}
+	resp.Term = rf.CurrentTerm
 	// candidate term is bigger, and votedfor no one,  candidate's logs at least >= self's logs
 	if rf.VotedFor == NoneVote || rf.VotedFor == req.CandidateID {
 		lastIndex := rf.Logs.GetLastIndex()
@@ -70,8 +71,8 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 		if lastTerm < req.LastLogTerm || (lastTerm == req.LastLogTerm && lastIndex <= req.LastLogIndex) {
 			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] success req: %v", req.CandidateID, rf.me, toJson(req))
 			resp.VoteGranted = true
-			rf.VotedFor = req.CandidateID // todo, receive leader's heartbeat , clear VotedFor
-			rf.TransFollower()
+			rf.VotedFor = req.CandidateID //
+			rf.TransFollower()            //todo
 			rf.RestartTimeOutElection()
 			needPersist = true
 		} else {
