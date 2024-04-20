@@ -121,15 +121,19 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 	}
 	rf.Lock()
 	defer rf.Unlock()
+	m := SendData
+	if len(req.Entries) == 0 {
+		m = SendHeart
+	}
 	if resp.Success {
 		rf.NextIndex[server] = max(rf.NextIndex[server], nextIndex)
 		rf.MatchIndex[server] = max(rf.MatchIndex[server], nextIndex-1)
 		rf.TryUpdateCommitID()
-		rf.debugf(SendData, "success, ->[S%v], req: %v, resp: %v, state: %v",
+		rf.debugf(m, "success, ->[S%v], req: %v, resp: %v, state: %v",
 			server, toJson(req), toJson(resp), toJson(rf))
 	} else {
 		if resp.Status == OutDateTerm {
-			rf.debugf(SendData, "fail to Follower  ->[S%v], req: %v, resp: %v", server, toJson(req), toJson(resp))
+			rf.debugf(m, "fail to Follower  ->[S%v], req: %v, resp: %v", server, toJson(req), toJson(resp))
 			if resp.Term > rf.CurrentTerm {
 				rf.CurrentTerm = max(rf.CurrentTerm, resp.Term)
 				rf.VotedFor = NoneVote
@@ -140,7 +144,7 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 			}
 		} else if resp.Status == NoMatch {
 			// No match
-			rf.debugf(SendData, "fail not match ->[S%v], notmatchIndex: %v, Term: %v", server, req.PrevLogIndex, req.PrevLogTerm)
+			rf.debugf(m, "fail not match ->[S%v], notmatchIndex: %v, Term: %v", server, req.PrevLogIndex, req.PrevLogTerm)
 			if resp.ConflictingTerm == -1 {
 				if rf.NextIndex[server] < resp.FirstConflictingIndex {
 					logger.Errorf("zzx123")
@@ -153,23 +157,18 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 						logger.Errorf("FirstConflictingIndex: %v, last: %v", resp.FirstConflictingIndex, last)
 					}
 					rf.NextIndex[server] = min(resp.FirstConflictingIndex, last)
-					// rf.NextIndex[server] = last
 				} else {
 					if resp.FirstConflictingIndex > rf.NextIndex[server] {
 						logger.Error(resp.FirstConflictingIndex, rf.NextIndex[server])
 					}
 					rf.NextIndex[server] = min(resp.FirstConflictingIndex, rf.NextIndex[server])
 				}
-				// rf.NextIndex[server] = max(rf.NextIndex[server]/3, 1)
 			}
-			// rf.NextIndex[server] = max(rf.NextIndex[server]/2, 1)
 			rf.MatchIndex[server] = rf.NextIndex[server] - 1
 			req.PrevLogIndex = rf.MatchIndex[server]
 			req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
 			nextIndex = rf.Logs.GetLastIndex() + 1
-			entries := make([]LogEntry, nextIndex-rf.NextIndex[server])
-			copy(entries, rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1))
-			req.Entries = entries
+			req.Entries = rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1)
 			logger.Infof("retry, id: %v, conflictedIndex: %v, term:%v, nextIndex: %v", req.ID, resp.FirstConflictingIndex,
 				resp.ConflictingTerm, rf.NextIndex[server])
 			go rf.SendLogData(server, req, resp, nextIndex)
@@ -218,9 +217,7 @@ func (rf *Raft) SendAllHeartBeat() {
 			nextIdx := rf.Logs.GetLastIndex() + 1
 			lastIndex := rf.Logs.GetLastIndex()
 			if rf.NextIndex[i] <= lastIndex {
-				entries := make([]LogEntry, lastIndex-nextIndex+1)
-				copy(entries, rf.Logs.GetSlice(rf.NextIndex[i], lastIndex))
-				req.Entries = entries
+				req.Entries = rf.Logs.GetSlice(rf.NextIndex[i], lastIndex)
 			}
 			go rf.SendLogData(i, &req, &resp, nextIdx)
 		}
