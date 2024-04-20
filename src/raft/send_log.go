@@ -133,6 +133,7 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 						logger.Errorf("FirstConflictingIndex: %v, last: %v", resp.FirstConflictingIndex, last)
 					}
 					rf.NextIndex[server] = min(resp.FirstConflictingIndex, last)
+					// rf.NextIndex[server] = last
 				} else {
 					if resp.FirstConflictingIndex > rf.NextIndex[server] {
 						logger.Error(resp.FirstConflictingIndex, rf.NextIndex[server])

@@ -146,7 +146,10 @@ func (rf *Raft) sendRequestVote(server int, req *RequestVoteArgs, resp *RequestV
 				rf.CurrentTerm = resp.Term
 			}
 		} else if resp.Status == OldLog {
-
+			// todo delete
+			rf.VotedFor = NoneVote
+			rf.TransFollower()
+			rf.RestartTimeOutElection()
 		}
 	}
 }
