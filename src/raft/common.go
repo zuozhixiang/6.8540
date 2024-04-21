@@ -55,7 +55,7 @@ const (
 
 	ArriveMsg Method = "ArriveMsg"
 
-	Snapshot   Method = "Snapshot"
+	Snapshot   Method = "ConSnapshot"
 	SendSnap   Method = "SendSnap"
 	ReciveSnap Method = "ReciveSnap"
 )

@@ -20,6 +20,8 @@ func (rf *Raft) persist() {
 	e.Encode(rf.CurrentTerm)
 	e.Encode(rf.VotedFor)
 	e.Encode(rf.Logs)
+	e.Encode(rf.LastIncludedIndex)
+	e.Encode(rf.LastIncludedTerm)
 	// e.Encode(rf.yyy)
 	raftstate := w.Bytes()
 	rf.persister.Save(raftstate, rf.SnapshotData)
@@ -36,19 +38,27 @@ func (rf *Raft) readPersist(data []byte) {
 	d := labgob.NewDecoder(r)
 	var term int32
 	var votedFor int
+	var lastIncludedIndex int
+	var lastIncludedTerm int32
 	var logs *LogEntrys
-	var snapshot []byte
-	if d.Decode(&term) != nil ||
-		d.Decode(&votedFor) != nil || d.Decode(&logs) != nil {
-		logger.Errorf("decode fail")
-	} else {
-		rf.CurrentTerm = term
-		rf.VotedFor = votedFor
-		rf.Logs = logs
+	if err := d.Decode(&term); err != nil {
+		logger.Panicf("decode fail: %v", err)
 	}
-	if d.Decode(&snapshot) != nil {
-		logger.Errorf("decode fail")
-	} else {
-		rf.SnapshotData = snapshot
+	if err := d.Decode(&votedFor); err != nil {
+		logger.Panicf("decode fail: %v", err)
 	}
+	if err := d.Decode(&logs); err != nil {
+		logger.Panicf("decode fail: %v", err)
+	}
+	if err := d.Decode(&lastIncludedIndex); err != nil {
+		logger.Panicf("decode fail: %v", err)
+	}
+	if err := d.Decode(&lastIncludedTerm); err != nil {
+		logger.Panicf("decode fail: %v", err)
+	}
+	rf.CurrentTerm = term
+	rf.VotedFor = votedFor
+	rf.Logs = logs
+	rf.LastIncludedTerm = lastIncludedTerm
+	rf.LastIncludedIndex = rf.LastIncludedIndex
 }

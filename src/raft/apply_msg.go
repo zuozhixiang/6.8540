@@ -15,41 +15,69 @@ import (
 // snapshots) on the applyCh, but set CommandValid to false for these
 // other uses.
 type ApplyMsg struct {
-	CommandValid bool
-	Command      interface{}
-	CommandIndex int
+	CommandValid bool        `json:"CommandValid,omitempty"`
+	Command      interface{} `json:"Command,omitempty"`
+	CommandIndex int         `json:"CommandIndex,omitempty"`
 
 	// For 3D:
-	SnapshotValid bool
-	Snapshot      []byte
-	SnapshotTerm  int
-	SnapshotIndex int
+	SnapshotValid bool   `json:"SnapshotValid,omitempty"`
+	Snapshot      []byte `json:"Snapshot,omitempty"`
+	SnapshotTerm  int    `json:"SnapshotTerm,omitempty"`
+	SnapshotIndex int    `json:"SnapshotIndex,omitempty"`
+}
+
+func getPrintMsg(msgs []ApplyMsg) string {
+	res := []ApplyMsg{}
+	for _, msg := range msgs {
+		res = append(res, ApplyMsg{
+			CommandValid:  msg.CommandValid,
+			Command:       msg.Command,
+			CommandIndex:  msg.CommandIndex,
+			SnapshotValid: msg.SnapshotValid,
+			SnapshotTerm:  msg.SnapshotTerm,
+			SnapshotIndex: msg.SnapshotIndex,
+		})
+	}
+	return toJson(res)
 }
 
 func (rf *Raft) apply() {
 	rf.Lock()
-	defer rf.Unlock()
 	needApplyMsg := []ApplyMsg{}
-	for rf.CommitIndex > rf.LastApplied {
-		rf.LastApplied++
+	rf.LastApplied = max(rf.LastApplied, rf.LastIncludedIndex)
+	if rf.NeedApplySnapshot != nil {
 		msg := ApplyMsg{
-			CommandValid: true,
-			Command:      rf.Logs.GetEntry(rf.LastApplied).Command,
-			CommandIndex: rf.LastApplied,
+			SnapshotValid: true,
+			Snapshot:      rf.SnapshotData,
+			SnapshotTerm:  int(rf.NeedApplyIncludedTerm),
+			SnapshotIndex: rf.NeedApplyInlucdedIndex,
 		}
 		needApplyMsg = append(needApplyMsg, msg)
-	}
-	for _, msg := range needApplyMsg {
-		rf.applyChan <- msg
+		rf.NeedApplySnapshot = nil
+	} else {
+		for rf.CommitIndex > rf.LastApplied {
+			rf.LastApplied++
+			msg := ApplyMsg{
+				CommandValid: true,
+				Command:      rf.Logs.GetEntry(rf.LastApplied).Command,
+				CommandIndex: rf.LastApplied,
+			}
+			needApplyMsg = append(needApplyMsg, msg)
+		}
 	}
 	if len(needApplyMsg) > 0 {
-		rf.debugf(ApplyMess, "len: %v, data: %+v", len(needApplyMsg), needApplyMsg)
+		rf.debugf(ApplyMess, "commitIndex:%v, lastApplied: %v, len: %v, data: %+v", rf.CommitIndex, rf.LastApplied, len(needApplyMsg), getPrintMsg(needApplyMsg))
+	}
+	rf.Unlock()
+	// this for , do not exec hold lock, it come to dead lock, beacase, applychan is full, and then can not release lock.
+	for _, msg := range needApplyMsg {
+		rf.applyChan <- msg
 	}
 }
 
 func (rf *Raft) ApplyMessage() {
 	for !rf.killed() {
-		ms := 30 + (rand.Int63() % 101)
+		ms := 50 + (rand.Int63() % 51)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 		rf.apply()
 	}

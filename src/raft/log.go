@@ -15,7 +15,7 @@ func (logs *LogEntrys) GetLastIndex() int {
 
 func (logs *LogEntrys) GetEntry(idx int) LogEntry {
 	if idx < 0+logs.Offset || idx > logs.GetLastIndex() {
-		logger.Errorf(" 非法idx: %v, last: %v, offset: %v", idx, logs.GetLastIndex(), logs.Offset)
+		logger.Panicf(" 非法idx: %v, last: %v, offset: %v", idx, logs.GetLastIndex(), logs.Offset)
 		return LogEntry{}
 	}
 	return logs.LogData[idx-logs.Offset]
@@ -42,8 +42,8 @@ func (logs *LogEntrys) Delete(idx int) {
 	if idx > logs.GetLastIndex() {
 		return
 	}
-	if idx < 1 {
-		logger.Errorf("delete 非法, idx: %v", idx)
+	if idx < 1+logs.Offset {
+		logger.Panicf("delete 非法, idx: %v", idx)
 		return
 	}
 	newValue := logs.LogData[:idx-logs.Offset]
@@ -58,17 +58,18 @@ func (logs *LogEntrys) Discard(idx int) {
 		logger.Errorf("Discard idx is illegal: %v", idx)
 		return
 	}
+	lastIncludedTerm := logs.GetEntry(idx).Term
 	newValue := logs.LogData[idx+1-logs.Offset:]
 	logs.LogData = []LogEntry{{
 		Command: nil,
-		Term:    -1,
+		Term:    lastIncludedTerm,
 	}}
 	logs.AppendLogEntrys(newValue)
 }
 
 func (logs *LogEntrys) GetSlice(left, right int) []LogEntry {
 	if left < 1+logs.Offset || right > logs.GetLastIndex() || left > right {
-		logger.Errorf("非法范围, left: %v, right: %v, last: %v", left, right, logs.GetLastIndex())
+		logger.Panicf("非法范围, left: %v, right: %v, last: %v", left, right, logs.GetLastIndex())
 		return nil
 	}
 	return logs.LogData[left-logs.Offset : right+1-logs.Offset]

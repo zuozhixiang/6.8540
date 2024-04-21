@@ -62,6 +62,14 @@ type Raft struct {
 	TimeOutDuration int64
 	LeaderID        int
 	SnapshotData    []byte
+
+	LastIncludedIndex int
+	LastIncludedTerm  int32
+
+	// need to apply
+	NeedApplyInlucdedIndex int
+	NeedApplyIncludedTerm  int32
+	NeedApplySnapshot      []byte
 }
 
 func (rf *Raft) Lock() {

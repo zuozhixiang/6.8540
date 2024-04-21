@@ -27,7 +27,6 @@ type AppendEntriesResponse struct {
 }
 
 func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResponse) {
-
 	m := ReciveData
 	if len(req.Entries) == 0 {
 		m = ReciveHeart
@@ -61,6 +60,31 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 	}
 	rf.RestartTimeOutElection()
 	rf.LeaderID = req.LeaderID
+	if req.PrevLogIndex < rf.LastIncludedIndex {
+		//log already be compact into snapshot, only append after rf.lastIncludedIndex‘s log
+		alreadyInSnapShotLen := rf.LastIncludedIndex - req.PrevLogIndex
+		if alreadyInSnapShotLen <= len(req.Entries) {
+			newReq := &AppendEntriesRequest{
+				ID:           req.ID,
+				Term:         req.Term,
+				LeaderID:     req.LeaderID,
+				PrevLogIndex: rf.LastIncludedIndex,
+				PrevLogTerm:  rf.LastIncludedTerm,
+				Entries:      req.Entries[alreadyInSnapShotLen:],
+				LeaderCommit: req.LeaderCommit,
+			}
+			req = newReq
+			rf.debugf(m, "Leader[S%v]->[S%v], partial logs in snapshot, preLogIndex: %v, lastIncludeIndex:%v, Entrys: %v", rf.LeaderID,
+				rf.me, req.PrevLogIndex, rf.LastIncludedIndex, req.Entries)
+		} else {
+			// entries all in snapshot,
+			rf.debugf(m, "Leader[S%v]->[S%v], all logs in snapshot, preLogIndex: %v, lastIncludeIndex:%v, Entrys: %v", rf.LeaderID,
+				rf.me, req.PrevLogIndex, rf.LastIncludedIndex, req.Entries)
+			resp.Success = true
+			return
+		}
+	}
+
 	if req.PrevLogIndex > rf.Logs.GetLastIndex() || rf.Logs.GetEntry(req.PrevLogIndex).Term != req.PrevLogTerm {
 		if req.PrevLogIndex > rf.Logs.GetLastIndex() {
 			rf.debugf(m, "Leader[S%v]-> fail, PrevIndex: %v, lastIndex: %v, state: %v", req.LeaderID, req.PrevLogIndex,
@@ -126,7 +150,7 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 			server, toJson(req), toJson(resp), toJson(rf))
 		rf.NextIndex[server] = max(rf.NextIndex[server], nextIndex)
 		rf.MatchIndex[server] = max(rf.MatchIndex[server], nextIndex-1)
-		rf.TryUpdateCommitID()
+		rf.TryUpdateCommitIndex()
 	} else {
 		if resp.Status == OutDateTerm {
 			rf.debugf(m, "fail to Follower  ->[S%v], req: %v, resp: %v", server, toJson(req), toJson(resp))
@@ -161,19 +185,32 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 				}
 			}
 			rf.MatchIndex[server] = rf.NextIndex[server] - 1
-			req.PrevLogIndex = rf.MatchIndex[server]
-			req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
-			nextIndex = rf.Logs.GetLastIndex() + 1
-			req.Entries = rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1)
-			logger.Infof("retry, id: %v, conflictedIndex: %v, term:%v, nextIndex: %v", req.ID, resp.FirstConflictingIndex,
-				resp.ConflictingTerm, rf.NextIndex[server])
-			go rf.SendLogData(server, req, resp, nextIndex)
+			if rf.NextIndex[server] <= rf.LastIncludedIndex {
+				// need to send snapshot
+				snapReq := &InstallSnapshotRequest{
+					Term:              rf.CurrentTerm,
+					LeaderID:          rf.me,
+					LastIncludedIndex: rf.LastIncludedIndex,
+					LastIncludedTerm:  rf.LastIncludedTerm,
+					Data:              rf.SnapshotData,
+				}
+				snapResp := &InstallSnapshotRespnse{}
+				go rf.SendSnapshot(server, snapReq, snapResp)
+			} else {
+				req.PrevLogIndex = rf.MatchIndex[server]
+				req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
+				nextIndex = rf.Logs.GetLastIndex() + 1
+				req.Entries = rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1)
+				logger.Infof("retry, id: %v, conflictedIndex: %v, term:%v, nextIndex: %v", req.ID, resp.FirstConflictingIndex,
+					resp.ConflictingTerm, rf.NextIndex[server])
+				go rf.SendLogData(server, req, resp, nextIndex)
+			}
 			return
 		}
 	}
 }
 
-func (rf *Raft) TryUpdateCommitID() {
+func (rf *Raft) TryUpdateCommitIndex() {
 	n := rf.Logs.GetLastIndex()
 	old_commitIndex := rf.CommitIndex
 	for N := n; N > old_commitIndex && rf.Logs.GetEntry(N).Term == rf.CurrentTerm; N-- {
@@ -199,23 +236,42 @@ func (rf *Raft) TryUpdateCommitID() {
 func (rf *Raft) SendAllHeartBeat() {
 	for i, _ := range rf.peers {
 		if i != rf.me {
-			nextIndex := rf.NextIndex[i]
-			req := AppendEntriesRequest{
-				ID:           getID(),
-				Term:         rf.CurrentTerm,
-				LeaderID:     rf.me,
-				Entries:      nil,
-				LeaderCommit: rf.CommitIndex,
-				PrevLogIndex: nextIndex - 1, // todo
-			}
-			req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term // todo
-			resp := AppendEntriesResponse{}
-			nextIdx := rf.Logs.GetLastIndex() + 1
 			lastIndex := rf.Logs.GetLastIndex()
-			if rf.NextIndex[i] <= lastIndex {
-				req.Entries = rf.Logs.GetSlice(rf.NextIndex[i], lastIndex)
+			if rf.NextIndex[i] <= rf.LastIncludedIndex {
+				// prevLogIndex already compact into snapshot,
+				// log be compact into snapshot, not find term.
+				// so, need to send snapshot
+				snaptReq := &InstallSnapshotRequest{
+					Term:              rf.CurrentTerm,
+					LeaderID:          rf.LeaderID,
+					LastIncludedIndex: rf.LastIncludedIndex,
+					LastIncludedTerm:  rf.LastIncludedTerm,
+					Data:              rf.SnapshotData,
+				}
+				snapResp := &InstallSnapshotRespnse{}
+				go rf.SendSnapshot(i, snaptReq, snapResp)
+			} else {
+				nextIndex := rf.NextIndex[i]
+				req := AppendEntriesRequest{
+					ID:           getID(),
+					Term:         rf.CurrentTerm,
+					LeaderID:     rf.me,
+					Entries:      nil,
+					LeaderCommit: rf.CommitIndex,
+					PrevLogIndex: nextIndex - 1, // todo
+				}
+				req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term // todo
+				resp := AppendEntriesResponse{}
+				nextIdx := rf.Logs.GetLastIndex() + 1
+				if rf.NextIndex[i] <= lastIndex {
+					// send log data
+					req.Entries = rf.Logs.GetSlice(rf.NextIndex[i], lastIndex)
+					go rf.SendLogData(i, &req, &resp, nextIdx)
+				} else {
+					// send heartbeat
+					go rf.SendLogData(i, &req, &resp, nextIdx)
+				}
 			}
-			go rf.SendLogData(i, &req, &resp, nextIdx)
 		}
 	}
 }
