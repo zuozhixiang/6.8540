@@ -67,17 +67,13 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 				rf.Logs.GetLastTerm(), toJson(rf))
 			resp.Status = NoMatch
 			resp.ConflictingTerm = -1
-			resp.FirstConflictingIndex = len(rf.Logs.LogData)
+			resp.FirstConflictingIndex = rf.Logs.GetLastIndex() + 1
 		} else {
 			rf.debugf(m, "Leader[S%v]-> fail, not match PrevIndex: %v, %v!=%v, state: %v", req.LeaderID,
 				req.PrevLogIndex, rf.Logs.GetEntry(req.PrevLogIndex).Term, req.PrevLogTerm, toJson(rf))
 			resp.Status = NoMatch
 			resp.ConflictingTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
-			ret := req.PrevLogIndex - 1
-			for rf.Logs.GetEntry(ret).Term == resp.ConflictingTerm {
-				ret--
-			}
-			resp.FirstConflictingIndex = ret + 1
+			resp.FirstConflictingIndex = rf.Logs.GetTermMinIndex(resp.ConflictingTerm)
 		}
 	} else {
 		resp.Success = true
@@ -126,11 +122,11 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 		m = SendHeart
 	}
 	if resp.Success {
+		rf.debugf(m, "success, ->[S%v], req: %v, resp: %v, state: %v",
+			server, toJson(req), toJson(resp), toJson(rf))
 		rf.NextIndex[server] = max(rf.NextIndex[server], nextIndex)
 		rf.MatchIndex[server] = max(rf.MatchIndex[server], nextIndex-1)
 		rf.TryUpdateCommitID()
-		rf.debugf(m, "success, ->[S%v], req: %v, resp: %v, state: %v",
-			server, toJson(req), toJson(resp), toJson(rf))
 	} else {
 		if resp.Status == OutDateTerm {
 			rf.debugf(m, "fail to Follower  ->[S%v], req: %v, resp: %v", server, toJson(req), toJson(resp))

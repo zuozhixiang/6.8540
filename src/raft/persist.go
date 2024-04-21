@@ -22,7 +22,7 @@ func (rf *Raft) persist() {
 	e.Encode(rf.Logs)
 	// e.Encode(rf.yyy)
 	raftstate := w.Bytes()
-	rf.persister.Save(raftstate, nil)
+	rf.persister.Save(raftstate, rf.SnapshotData)
 }
 
 // restore previously persisted state.
@@ -37,6 +37,7 @@ func (rf *Raft) readPersist(data []byte) {
 	var term int32
 	var votedFor int
 	var logs *LogEntrys
+	var snapshot []byte
 	if d.Decode(&term) != nil ||
 		d.Decode(&votedFor) != nil || d.Decode(&logs) != nil {
 		logger.Errorf("decode fail")
@@ -44,5 +45,10 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.CurrentTerm = term
 		rf.VotedFor = votedFor
 		rf.Logs = logs
+	}
+	if d.Decode(&snapshot) != nil {
+		logger.Errorf("decode fail")
+	} else {
+		rf.SnapshotData = snapshot
 	}
 }

@@ -29,18 +29,21 @@ type ApplyMsg struct {
 func (rf *Raft) apply() {
 	rf.Lock()
 	defer rf.Unlock()
+	needApplyMsg := []ApplyMsg{}
 	for rf.CommitIndex > rf.LastApplied {
-		if rf.killed() {
-			break
-		}
 		rf.LastApplied++
 		msg := ApplyMsg{
 			CommandValid: true,
 			Command:      rf.Logs.GetEntry(rf.LastApplied).Command,
 			CommandIndex: rf.LastApplied,
 		}
+		needApplyMsg = append(needApplyMsg, msg)
+	}
+	for _, msg := range needApplyMsg {
 		rf.applyChan <- msg
-		rf.debugf(ApplyMess, "msg: %v", toJson(msg))
+	}
+	if len(needApplyMsg) > 0 {
+		rf.debugf(ApplyMess, "len: %v, data: %+v", len(needApplyMsg), needApplyMsg)
 	}
 }
 

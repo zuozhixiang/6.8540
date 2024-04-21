@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const Debug = false
+const Debug = true
 
 var logger *zap.SugaredLogger
 
@@ -54,6 +54,10 @@ const (
 	LeaderElection    Method = "Election"
 
 	ArriveMsg Method = "ArriveMsg"
+
+	Snapshot   Method = "Snapshot"
+	SendSnap   Method = "SendSnap"
+	ReciveSnap Method = "ReciveSnap"
 )
 
 const path = `/Users/bytedance/zzx/6.8540/`

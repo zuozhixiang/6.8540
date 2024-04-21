@@ -61,6 +61,7 @@ type Raft struct {
 	TimeOutElection int64
 	TimeOutDuration int64
 	LeaderID        int
+	SnapshotData    []byte
 }
 
 func (rf *Raft) Lock() {
@@ -80,15 +81,6 @@ func (rf *Raft) GetState() (int, bool) {
 	var term = rf.CurrentTerm
 	var isleader = rf.State == Leader
 	return int(term), isleader
-}
-
-// the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (3D).
-
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -116,7 +108,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.persist()
 	index = rf.Logs.GetLastIndex()
 	term = int(rf.Logs.GetLastTerm())
-	rf.debugf(ArriveMsg, "arrvie new msg: %v", command)
+	rf.debugf(ArriveMsg, "arrvie new msg: %v, idx: %v", command, index)
 	rf.SendAllHeartBeat()
 	return index, term, true
 }
