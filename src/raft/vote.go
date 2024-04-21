@@ -171,10 +171,9 @@ func (rf *Raft) TransLeader() {
 	rf.LeaderID = rf.me
 	for i := 0; i < rf.n; i++ {
 		rf.NextIndex[i] = rf.Logs.GetLastIndex() + 1
-		rf.MatchIndex[i] = 0
+		rf.MatchIndex[i] = rf.LastIncludedIndex
 	}
 	rf.SendAllHeartBeat()
-	rf.persist()
 }
 
 func (rf *Raft) TransFollower() {

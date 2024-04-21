@@ -44,26 +44,15 @@ func getPrintMsg(msgs []ApplyMsg) string {
 func (rf *Raft) apply() {
 	rf.Lock()
 	needApplyMsg := []ApplyMsg{}
-	rf.LastApplied = max(rf.LastApplied, rf.LastIncludedIndex)
-	if rf.NeedApplySnapshot != nil {
+	tempLastApplied := rf.LastApplied
+	for rf.CommitIndex > tempLastApplied {
+		tempLastApplied += 1
 		msg := ApplyMsg{
-			SnapshotValid: true,
-			Snapshot:      rf.NeedApplySnapshot,
-			SnapshotTerm:  int(rf.NeedApplyIncludedTerm),
-			SnapshotIndex: rf.NeedApplyInlucdedIndex,
+			CommandValid: true,
+			Command:      rf.Logs.GetEntry(tempLastApplied).Command,
+			CommandIndex: tempLastApplied,
 		}
 		needApplyMsg = append(needApplyMsg, msg)
-		rf.NeedApplySnapshot = nil
-	} else {
-		for rf.CommitIndex > rf.LastApplied {
-			rf.LastApplied++
-			msg := ApplyMsg{
-				CommandValid: true,
-				Command:      rf.Logs.GetEntry(rf.LastApplied).Command,
-				CommandIndex: rf.LastApplied,
-			}
-			needApplyMsg = append(needApplyMsg, msg)
-		}
 	}
 	if len(needApplyMsg) > 0 {
 		rf.debugf(ApplyMess, "commitIndex:%v, lastApplied: %v, len: %v, data: %+v", rf.CommitIndex, rf.LastApplied, len(needApplyMsg), getPrintMsg(needApplyMsg))
@@ -71,7 +60,20 @@ func (rf *Raft) apply() {
 	rf.Unlock()
 	// this for , do not exec hold lock, it come to dead lock, beacase, applychan is full, and then can not release lock.
 	for _, msg := range needApplyMsg {
+		rf.mu.Lock()
+		if msg.CommandIndex != rf.LastApplied+1 {
+			rf.Unlock()
+			continue
+		}
+		rf.Unlock()
 		rf.applyChan <- msg
+		rf.Lock()
+		if msg.CommandIndex != rf.LastApplied+1 {
+			rf.mu.Unlock()
+			continue
+		}
+		rf.LastApplied = msg.CommandIndex
+		rf.Unlock()
 	}
 }
 

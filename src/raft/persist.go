@@ -62,3 +62,9 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.LastIncludedTerm = lastIncludedTerm
 	rf.LastIncludedIndex = rf.LastIncludedIndex
 }
+func (rf *Raft) readSnapshot(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	rf.SnapshotData = data
+}

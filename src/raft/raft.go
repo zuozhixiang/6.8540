@@ -65,11 +65,6 @@ type Raft struct {
 
 	LastIncludedIndex int
 	LastIncludedTerm  int32
-
-	// need to apply
-	NeedApplyInlucdedIndex int
-	NeedApplyIncludedTerm  int32
-	NeedApplySnapshot      []byte
 }
 
 func (rf *Raft) Lock() {
@@ -170,6 +165,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.RestartTimeOutElection()
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+	rf.readSnapshot(persister.ReadSnapshot())
 	// start ticker goroutine to start elections
 	rf.infof("Start Run")
 	rf.infof("恢复, state: %v", toJson(rf))

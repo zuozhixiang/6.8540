@@ -188,6 +188,7 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 			if rf.NextIndex[server] <= rf.LastIncludedIndex {
 				// need to send snapshot
 				snapReq := &InstallSnapshotRequest{
+					ID:                getID(),
 					Term:              rf.CurrentTerm,
 					LeaderID:          rf.me,
 					LastIncludedIndex: rf.LastIncludedIndex,
@@ -242,8 +243,9 @@ func (rf *Raft) SendAllHeartBeat() {
 				// log be compact into snapshot, not find term.
 				// so, need to send snapshot
 				snaptReq := &InstallSnapshotRequest{
+					ID:                getID(),
 					Term:              rf.CurrentTerm,
-					LeaderID:          rf.LeaderID,
+					LeaderID:          rf.me,
 					LastIncludedIndex: rf.LastIncludedIndex,
 					LastIncludedTerm:  rf.LastIncludedTerm,
 					Data:              rf.SnapshotData,
@@ -266,11 +268,8 @@ func (rf *Raft) SendAllHeartBeat() {
 				if rf.NextIndex[i] <= lastIndex {
 					// send log data
 					req.Entries = rf.Logs.GetSlice(rf.NextIndex[i], lastIndex)
-					go rf.SendLogData(i, &req, &resp, nextIdx)
-				} else {
-					// send heartbeat
-					go rf.SendLogData(i, &req, &resp, nextIdx)
 				}
+				go rf.SendLogData(i, &req, &resp, nextIdx)
 			}
 		}
 	}
