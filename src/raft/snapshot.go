@@ -8,11 +8,12 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (3D).
 	rf.Lock()
 	defer rf.Unlock()
+
 	if index > rf.CommitIndex {
 		rf.debugf(Snapshot, "warn index > commit index")
 		return
 	}
-	if index <= rf.Logs.Offset {
+	if index <= rf.LastIncludedIndex {
 		rf.debugf(Snapshot, "warn index already in snapshot")
 		return
 	}
@@ -66,7 +67,8 @@ func (rf *Raft) InstallSnapshot(req *InstallSnapshotRequest, resp *InstallSnapsh
 	}
 	rf.RestartTimeOutElection()
 	if req.LastIncludedIndex <= rf.NeedApplyInlucdedIndex {
-		rf.debugf(ReciveSnap, "Leader[S%v] snapshot already in", req.LeaderID)
+		rf.debugf(ReciveSnap, "Leader[S%v] snapshot already in, applyIncludedIndex:%v, req: %v", req.LeaderID,
+			rf.NeedApplyInlucdedIndex, getJsonReq(req))
 		return
 	}
 	rf.debugf(ReciveSnap, "Leader[S%v] snapshot success, req: %v", req.LeaderID, getJsonReq(req))

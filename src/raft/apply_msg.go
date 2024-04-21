@@ -48,7 +48,7 @@ func (rf *Raft) apply() {
 	if rf.NeedApplySnapshot != nil {
 		msg := ApplyMsg{
 			SnapshotValid: true,
-			Snapshot:      rf.SnapshotData,
+			Snapshot:      rf.NeedApplySnapshot,
 			SnapshotTerm:  int(rf.NeedApplyIncludedTerm),
 			SnapshotIndex: rf.NeedApplyInlucdedIndex,
 		}
