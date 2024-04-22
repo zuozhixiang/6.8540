@@ -60,7 +60,7 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.VotedFor = votedFor
 	rf.Logs = logs
 	rf.LastIncludedTerm = lastIncludedTerm
-	rf.LastIncludedIndex = rf.LastIncludedIndex
+	rf.LastIncludedIndex = lastIncludedIndex
 }
 func (rf *Raft) readSnapshot(data []byte) {
 	if len(data) == 0 {

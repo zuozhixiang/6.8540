@@ -2,13 +2,13 @@
 
 
 # 循环 50 次
-for ((i=1; i<=100; i++))
+for ((i=1; i<=5; i++))
 do
     echo "" > a.log
     current_time=$(date "+%Y-%m-%d %H:%M:%S")
     echo "test ${i} ${current_time}"
     echo "test ${i} ${current_time}" >> a.log
-    go test -run 3B >> a.log
+    go test >> a.log
     fail_count=$(ag FAIL a.log | wc -l)
     if [ ${fail_count} -gt 0 ]
     then

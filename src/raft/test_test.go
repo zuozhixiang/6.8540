@@ -1116,9 +1116,8 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 
 	cfg.one(rand.Int(), servers, true)
 	leader1 := cfg.checkOneLeader()
-	logger.Infof("leader: [S%v]", leader1)
+
 	for i := 0; i < iters; i++ {
-		logger.Infof("i: %v", i)
 		victim := (leader1 + 1) % servers
 		sender := leader1
 		if i%3 == 1 {
@@ -1137,7 +1136,6 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 
 		// perhaps send enough to get a snapshot
 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
-		logger.Infof("start send msg: %v", nn)
 		for i := 0; i < nn; i++ {
 			cfg.rafts[sender].Start(rand.Int())
 		}
@@ -1148,7 +1146,6 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			// an InstallSnapshot RPC isn't required for
 			// TestSnapshotBasic3D().
 			cfg.one(rand.Int(), servers, true)
-			logger.Infof("xxxx")
 		} else {
 			cfg.one(rand.Int(), servers-1, true)
 		}

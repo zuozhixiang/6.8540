@@ -44,6 +44,7 @@ func getPrintMsg(msgs []ApplyMsg) string {
 func (rf *Raft) apply() {
 	rf.Lock()
 	needApplyMsg := []ApplyMsg{}
+	rf.LastApplied = max(rf.LastApplied, rf.LastIncludedIndex)
 	tempLastApplied := rf.LastApplied
 	for rf.CommitIndex > tempLastApplied {
 		tempLastApplied += 1
