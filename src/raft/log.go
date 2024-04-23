@@ -1,5 +1,7 @@
 package raft
 
+import "sort"
+
 /*
 all operation related with log in this file
 */
@@ -87,6 +89,14 @@ func (logs *LogEntrys) GetSlice(left, right int) []LogEntry {
 func (logs *LogEntrys) GetTermMaxIndex(term int32) int {
 	idx := -1
 	n := logs.GetLastIndex() - logs.Offset
+
+	ret := sort.Search(n+1, func(i int) bool {
+		return logs.LogData[i].Term >= term+1
+	})
+	if ret == n+1 {
+		return -1
+	}
+	return ret - 1 + logs.Offset
 	for i := n; i >= 1; i-- {
 		if logs.LogData[i].Term == term {
 			idx = i
@@ -98,12 +108,20 @@ func (logs *LogEntrys) GetTermMaxIndex(term int32) int {
 
 func (logs *LogEntrys) GetTermMinIndex(term int32) int {
 	n := logs.GetLastIndex() - logs.Offset
-	for i := 1; i <= n; i++ {
-		if logs.LogData[i].Term == term {
-			return i + logs.Offset
-		}
+
+	idx := sort.Search(n+1, func(i int) bool {
+		return logs.LogData[i].Term >= term
+	})
+	if idx == n+1 {
+		return -1
 	}
-	return n + logs.Offset
+	return idx + logs.Offset
+	//for i := 1; i <= n; i++ {
+	//	if logs.LogData[i].Term == term {
+	//		return i + logs.Offset
+	//	}
+	//}
+	//return n + logs.Offset
 }
 
 func (logs *LogEntrys) SetOffset(newV int) {

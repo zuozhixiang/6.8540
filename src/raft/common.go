@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const Debug = true // print log switch
+const Debug = false // print log switch
 
 var logger *zap.SugaredLogger
 

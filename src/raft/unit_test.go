@@ -4,6 +4,7 @@ import (
 	"6.5840/labgob"
 	"bytes"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
@@ -36,4 +37,20 @@ func TestGobLog(t *testing.T) {
 		return
 	}
 	fmt.Println(logs1)
+}
+
+func TestGetMinORMax(t *testing.T) {
+	logs1 := MakeEmptyLog()
+	logs1.AppendLogEntry("123", 1)
+	logs1.AppendLogEntry("123", 1)
+	logs1.AppendLogEntry("123", 1)
+	logs1.AppendLogEntry("123", 1)
+	logs1.AppendLogEntry("123", 3)
+	idx := logs1.GetTermMinIndex(3)
+	assert.Equal(t, 5, idx)
+	idx = logs1.GetTermMinIndex(1)
+	assert.Equal(t, 1, idx)
+
+	idx = logs1.GetTermMaxIndex(1)
+	assert.Equal(t, 4, idx)
 }
