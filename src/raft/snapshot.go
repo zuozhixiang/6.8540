@@ -4,7 +4,6 @@ package raft
 // all info up to and including index. this means the
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
-
 func (rf *Raft) saveSnapshot(index int, snapshot []byte) {
 	if rf.LastIncludedIndex >= index {
 		rf.debugf(Snapshot, "warn index already in snapshot")
@@ -47,6 +46,7 @@ type InstallSnapshotRespnse struct {
 	Term int32
 }
 
+// for print log
 func getJsonReq(req *InstallSnapshotRequest) string {
 	newReq := InstallSnapshotRequest{
 		Term:              req.Term,
@@ -57,18 +57,19 @@ func getJsonReq(req *InstallSnapshotRequest) string {
 	return toJson(newReq)
 }
 
+// InstallSnapshot RPC
 func (rf *Raft) InstallSnapshot(req *InstallSnapshotRequest, resp *InstallSnapshotRespnse) {
 	if rf.killed() {
 		return
 	}
 	rf.Lock()
 	defer rf.Unlock()
-	if req.Term < rf.CurrentTerm {
+	if req.Term < rf.CurrentTerm { // checkout term old
 		rf.debugf(ReciveSnap, "outdate term, leadId:[S%v], Term: %v, curTerm: %v", req.LeaderID, req.Term, rf.CurrentTerm)
 		resp.Term = rf.CurrentTerm
 		return
 	}
-	if req.Term > rf.CurrentTerm {
+	if req.Term > rf.CurrentTerm { // update self term
 		rf.VotedFor = NoneVote
 		rf.CurrentTerm = req.Term
 		rf.TransFollower()
@@ -110,7 +111,8 @@ func (rf *Raft) InstallSnapshot(req *InstallSnapshotRequest, resp *InstallSnapsh
 	rf.applyChan <- msg
 }
 
-func (rf *Raft) SendSnapshot(server int, req *InstallSnapshotRequest, resp *InstallSnapshotRespnse) {
+func (rf *Raft) SendSnapshot(server int, req *InstallSnapshotRequest) {
+	resp := &InstallSnapshotRespnse{}
 	if rf.killed() {
 		return
 	}

@@ -41,28 +41,33 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
-	n         int
-	applyChan chan ApplyMsg
+	n         int                 // the number of all raft nodes
+	applyChan chan ApplyMsg       // raft communicate with state machine by channel, raft apply log(command or snapshot) to state machine
 
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+
+	// data needed to be stored in persistent storage, others data in memory
 	CurrentTerm int32
 	VotedFor    int
 	Logs        *LogEntrys
 
+	// all raft node need to maintain
 	CommitIndex int
 	LastApplied int
+	State       int32
 
+	// leader node need to maintain
 	NextIndex  []int
 	MatchIndex []int
 
-	State           int32
-	TimeOutElection int64
-	TimeOutDuration int64
-	LeaderID        int
-	SnapshotData    []byte
+	TimeOutElection int64 // next timeout timestamp, ms
+	TimeOutDuration int64 // timeout duration, ms
+	LeaderID        int   // node need to know who is leader
 
+	// snapshot related info, include data and last index in the snapshot
+	SnapshotData      []byte
 	LastIncludedIndex int
 	LastIncludedTerm  int32
 }
@@ -162,15 +167,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.LastApplied = 0
 	rf.NextIndex = make([]int, rf.n)
 	rf.MatchIndex = make([]int, rf.n)
-	rf.RestartTimeOutElection()
+	rf.RestartTimeOutElection() // reset timeout ticker
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 	rf.readSnapshot(persister.ReadSnapshot())
-	// start ticker goroutine to start elections
 	rf.infof("Start Run")
-	rf.infof("恢复, state: %v", toJson(rf))
-	go rf.checkTimeoutElection()
-	go rf.sendHeartBeat()
-	go rf.ApplyMessage()
+	rf.debugf("recover now state: %v", toJson(rf))
+	go rf.checkTimeoutElection() // scheduled to check timeout election  in the background
+	go rf.sendHeartBeat()        // scheduled to send heartbeat for leader in the background
+	go rf.ApplyMessage()         // shecduled to apply log for server state matche
 	return rf
 }

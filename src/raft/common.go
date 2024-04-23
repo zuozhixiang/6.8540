@@ -7,22 +7,24 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/constraints"
 	"math/rand"
+	"os"
 	"runtime"
 	"sync/atomic"
 	"time"
 )
 
-const Debug = false
+const Debug = true // print log switch
 
 var logger *zap.SugaredLogger
 
+// init logger object, globall single, set logger's config
 func init() {
 	config := zap.NewDevelopmentConfig()
 	enconfig := zap.NewDevelopmentEncoderConfig()
 	enconfig.EncodeCaller = nil
-	enconfig.EncodeTime = zapcore.TimeEncoderOfLayout(time.StampMilli)
+	enconfig.EncodeTime = zapcore.TimeEncoderOfLayout(time.StampMilli) // set format of time
 	config.EncoderConfig = enconfig
-	config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+	config.Level = zap.NewAtomicLevelAt(zap.DebugLevel) // set print log level
 	logger1, err := config.Build()
 	if err != nil {
 		return
@@ -60,13 +62,17 @@ const (
 	ReciveSnap Method = "ReciveSnap"
 )
 
-const path = `/Users/bytedance/zzx/6.8540/`
-const Len = len(path)
+var Len int
+
+func init() {
+	prefixPath, _ := os.Getwd()
+	Len = len(prefixPath) + 1
+}
 
 func (rf *Raft) debugf(meth Method, format string, a ...interface{}) {
 	if Debug {
 		_, file, line, _ := runtime.Caller(1)
-		pos := fmt.Sprintf("%v:%v", file[Len:], line)
+		pos := fmt.Sprintf("%v:%v", file[Len:], line) // print log code line
 		state := atomic.LoadInt32(&rf.State)
 		term := atomic.LoadInt32(&rf.CurrentTerm)
 		me := rf.me
@@ -128,18 +134,17 @@ func toJson(data interface{}) string {
 
 const Max = int64(1) << 61
 
+// get random request id
 func getID() int64 {
 	return rand.Int63n(Max)
 }
 
-func GetRand(left, right int) int {
-	return left + rand.Intn(right-left+1)
-}
-
+// get current timestamp
 func GetNow() int64 {
 	return time.Now().UnixMilli()
 }
 
+// get min one in a, b
 func min[T constraints.Ordered](a, b T) T {
 	if a < b {
 		return a
@@ -148,6 +153,7 @@ func min[T constraints.Ordered](a, b T) T {
 	}
 }
 
+// max
 func max[T constraints.Ordered](a, b T) T {
 	if a > b {
 		return a

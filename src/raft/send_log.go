@@ -86,6 +86,7 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 	}
 
 	if req.PrevLogIndex > rf.Logs.GetLastIndex() || rf.Logs.GetEntry(req.PrevLogIndex).Term != req.PrevLogTerm {
+		// prevLogTerm not match
 		if req.PrevLogIndex > rf.Logs.GetLastIndex() {
 			rf.debugf(m, "Leader[S%v]-> fail, PrevIndex: %v, lastIndex: %v, state: %v", req.LeaderID, req.PrevLogIndex,
 				rf.Logs.GetLastTerm(), toJson(rf))
@@ -103,6 +104,10 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 		resp.Success = true
 		rf.debugf(m, "Leader[S%v]-> success, req: %v, state: %v", req.LeaderID, toJson(req), toJson(rf))
 		lastIndex := rf.Logs.GetLastIndex()
+		// notice: raft paper descript:
+		//If an existing entry conflicts with a new one (same index
+		//but different terms), delete the existing entry and all that
+		//follow it (
 		for i, entry := range req.Entries {
 			x := i + 1 + req.PrevLogIndex
 			if (x <= lastIndex && rf.Logs.GetEntry(x).Term != entry.Term) || (x > lastIndex) {
@@ -115,7 +120,8 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 				break
 			}
 		}
-		rf.TransFollower() // todo
+		rf.TransFollower()
+		// paper:  If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
 		if req.LeaderCommit > rf.CommitIndex {
 			rf.CommitIndex = min(req.LeaderCommit, req.PrevLogIndex+len(req.Entries))
 		}
@@ -126,7 +132,9 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 	}
 }
 
-func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendEntriesResponse, nextIndex int) {
+// server is raft node id , req is request param, nextIndex is new nextIndex of the server  after append success
+func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, nextIndex int) {
+	resp := &AppendEntriesResponse{}
 	for !rf.killed() {
 		ok := rf.peers[server].Call("Raft.AppendEntries", req, resp)
 		rf.Lock()
@@ -163,24 +171,17 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 				rf.persist()
 			}
 		} else if resp.Status == NoMatch {
-			// No match
+			// No match， need to decrease nextIndex of the server
 			rf.debugf(m, "fail not match ->[S%v], notmatchIndex: %v, Term: %v", server, req.PrevLogIndex, req.PrevLogTerm)
-			if resp.ConflictingTerm == -1 {
-				if rf.NextIndex[server] < resp.FirstConflictingIndex {
-					logger.Errorf("zzx123")
-				}
+			// following code is speeding up decrease nextIndex of the server
+			if resp.ConflictingTerm == -1 { // -1 represents this follower whose logs is to short
 				rf.NextIndex[server] = resp.FirstConflictingIndex
 			} else {
 				last := rf.Logs.GetTermMaxIndex(resp.ConflictingTerm)
-				if last != -1 {
-					if resp.FirstConflictingIndex < last {
-						logger.Errorf("FirstConflictingIndex: %v, last: %v", resp.FirstConflictingIndex, last)
-					}
+				if last != -1 { //
 					rf.NextIndex[server] = min(resp.FirstConflictingIndex, last)
 				} else {
-					if resp.FirstConflictingIndex > rf.NextIndex[server] {
-						logger.Error(resp.FirstConflictingIndex, rf.NextIndex[server])
-					}
+					// -1 represents ConflictingTerm  is non-existent in leader logs
 					rf.NextIndex[server] = min(resp.FirstConflictingIndex, rf.NextIndex[server])
 				}
 			}
@@ -195,8 +196,7 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 					LastIncludedTerm:  rf.LastIncludedTerm,
 					Data:              rf.SnapshotData,
 				}
-				snapResp := &InstallSnapshotRespnse{}
-				go rf.SendSnapshot(server, snapReq, snapResp)
+				go rf.SendSnapshot(server, snapReq)
 			} else {
 				req.PrevLogIndex = rf.MatchIndex[server]
 				req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
@@ -204,7 +204,7 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 				req.Entries = rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1)
 				logger.Infof("retry, id: %v, conflictedIndex: %v, term:%v, nextIndex: %v", req.ID, resp.FirstConflictingIndex,
 					resp.ConflictingTerm, rf.NextIndex[server])
-				go rf.SendLogData(server, req, resp, nextIndex)
+				go rf.SendLogData(server, req, nextIndex)
 			}
 			return
 		}
@@ -214,6 +214,10 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, resp *AppendE
 func (rf *Raft) TryUpdateCommitIndex() {
 	n := rf.Logs.GetLastIndex()
 	old_commitIndex := rf.CommitIndex
+	// paper:
+	// If there exists an N such that N > commitIndex, a majority
+	//of matchIndex[i] ≥ N, and log[N].term == currentTerm:
+	//set commitIndex = N
 	for N := n; N > old_commitIndex && rf.Logs.GetEntry(N).Term == rf.CurrentTerm; N-- {
 		cnt := 1
 		for i, x := range rf.MatchIndex {
@@ -250,8 +254,7 @@ func (rf *Raft) SendAllHeartBeat() {
 					LastIncludedTerm:  rf.LastIncludedTerm,
 					Data:              rf.SnapshotData,
 				}
-				snapResp := &InstallSnapshotRespnse{}
-				go rf.SendSnapshot(i, snaptReq, snapResp)
+				go rf.SendSnapshot(i, snaptReq)
 			} else {
 				nextIndex := rf.NextIndex[i]
 				req := AppendEntriesRequest{
@@ -260,16 +263,15 @@ func (rf *Raft) SendAllHeartBeat() {
 					LeaderID:     rf.me,
 					Entries:      nil,
 					LeaderCommit: rf.CommitIndex,
-					PrevLogIndex: nextIndex - 1, // todo
+					PrevLogIndex: nextIndex - 1,
 				}
-				req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term // todo
-				resp := AppendEntriesResponse{}
+				req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
 				nextIdx := rf.Logs.GetLastIndex() + 1
 				if rf.NextIndex[i] <= lastIndex {
 					// send log data
 					req.Entries = rf.Logs.GetSlice(rf.NextIndex[i], lastIndex)
 				}
-				go rf.SendLogData(i, &req, &resp, nextIdx)
+				go rf.SendLogData(i, &req, nextIdx)
 			}
 		}
 	}
