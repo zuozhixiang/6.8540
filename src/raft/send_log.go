@@ -124,6 +124,7 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 		// paper:  If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
 		if req.LeaderCommit > rf.CommitIndex {
 			rf.CommitIndex = min(req.LeaderCommit, req.PrevLogIndex+len(req.Entries))
+			rf.cond.Signal()
 		}
 		needPersist = true
 	}
@@ -235,6 +236,7 @@ func (rf *Raft) TryUpdateCommitIndex() {
 	}
 	if rf.CommitIndex > old_commitIndex {
 		rf.debugf(UpdateCommitIndex, "old idx [%v]->[%v]", old_commitIndex, rf.CommitIndex)
+		rf.cond.Signal()
 	}
 }
 

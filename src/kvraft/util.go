@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -75,5 +76,16 @@ func debugf(meth Method, me int, format string, a ...interface{}) {
 		x := []interface{}{pos, meth, info}
 		x = append(x, a...)
 		logger.Debugf(fmt, x...)
+	}
+}
+
+func startTimeout(cond *sync.Cond, timeoutChan chan bool) {
+	timeout := time.After(1 * time.Second)
+	select {
+	case <-timeout:
+		{
+			timeoutChan <- true
+			cond.Broadcast()
+		}
 	}
 }

@@ -43,7 +43,7 @@ type Raft struct {
 	dead      int32               // set by Kill()
 	n         int                 // the number of all raft nodes
 	applyChan chan ApplyMsg       // raft communicate with state machine by channel, raft apply log(command or snapshot) to state machine
-
+	cond      *sync.Cond
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
@@ -167,6 +167,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.LastApplied = 0
 	rf.NextIndex = make([]int, rf.n)
 	rf.MatchIndex = make([]int, rf.n)
+	rf.cond = sync.NewCond(&rf.mu)
 	rf.RestartTimeOutElection() // reset timeout ticker
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

@@ -80,9 +80,8 @@ func (kv *KVServer) Append(req *PutAppendArgs, resp *PutAppendReply) {
 		return
 	}
 	oldv := kv.data[req.Key]
-	newv := oldv + req.Value
 	kv.oldData[req.ID] = oldv
-	kv.data[req.Key] = newv
+	kv.data[req.Key] = kv.data[req.Key] + req.Value
 	resp.Value = oldv
 	//  logger.Debugf("ser Sucess Append:  req: %v, resp: %v", toJson(req), toJson(resp))
 }

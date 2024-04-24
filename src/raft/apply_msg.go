@@ -1,10 +1,5 @@
 package raft
 
-import (
-	"math/rand"
-	"time"
-)
-
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
 // tester) on the same server, via the applyCh passed to Make(). set
@@ -46,6 +41,11 @@ func (rf *Raft) apply() {
 	needApplyMsg := []ApplyMsg{}
 	rf.LastApplied = max(rf.LastApplied, rf.LastIncludedIndex)
 	tempLastApplied := rf.LastApplied
+	for !(rf.CommitIndex > tempLastApplied) {
+		rf.cond.Wait()
+		rf.LastApplied = max(rf.LastApplied, rf.LastIncludedIndex)
+		tempLastApplied = rf.LastApplied
+	}
 	for rf.CommitIndex > tempLastApplied {
 		tempLastApplied += 1
 		msg := ApplyMsg{
@@ -80,8 +80,8 @@ func (rf *Raft) apply() {
 
 func (rf *Raft) ApplyMessage() {
 	for !rf.killed() {
-		ms := 50 + (rand.Int63() % 51)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
+		//ms := 10 + (rand.Int63() % 5)
+		//time.Sleep(time.Duration(ms) * time.Millisecond)
 		rf.apply()
 	}
 }
