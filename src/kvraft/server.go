@@ -77,8 +77,12 @@ func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 		resp.Err = ErrWrongLeader
 		return
 	}
-
 	resp.Err = OK
+	if kv.checkExecuted(req.ID) {
+		resp.Value = kv.versionData[req.ID]
+		return
+	}
+
 	op := Op{
 		ID:   req.ID,
 		Key:  req.Key,
