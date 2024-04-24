@@ -38,6 +38,7 @@ type KVServer struct {
 	// Your definitions here.
 	data             map[string]string
 	executed         map[string]bool
+	versionData      map[string]string
 	lastAppliedIndex int
 	cond             *sync.Cond
 }
@@ -79,6 +80,8 @@ func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 
 	resp.Err = OK
 	op := Op{
+		ID:   req.ID,
+		Key:  req.Key,
 		Type: GetType,
 	}
 
@@ -111,16 +114,9 @@ func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
 		return
 	}
-	res := ""
-	defer func() {
-		debugf(m, kv.me, "success, req: %v, value: %v", toJson(req), res)
-	}()
-	if value, ok := kv.data[req.Key]; ok {
-		resp.Value = value
-		res = value
-		return
-	}
-	resp.Value = ""
+	res := kv.versionData[op.ID]
+	debugf(m, kv.me, "success, req: %v, value: %v", toJson(req), res)
+	resp.Value = res
 }
 
 func (kv *KVServer) Put(req *PutAppendArgs, resp *PutAppendReply) {
@@ -149,6 +145,7 @@ func (kv *KVServer) Put(req *PutAppendArgs, resp *PutAppendReply) {
 		Key:   req.Key,
 		Value: req.Value,
 	}
+	debugf(m, kv.me, "start, id: %v", req.ID)
 	index, term, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		debugf(m, kv.me, "not leader, req: %v", toJson(req))
@@ -205,7 +202,7 @@ func (kv *KVServer) Append(req *PutAppendArgs, resp *PutAppendReply) {
 		Key:   req.Key,
 		Value: req.Value,
 	}
-
+	debugf(meth, kv.me, "start id: %v", req.ID)
 	index, term, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		debugf(meth, kv.me, "not leader, req: %v", toJson(req))
@@ -221,6 +218,7 @@ func (kv *KVServer) Append(req *PutAppendArgs, resp *PutAppendReply) {
 		select {
 		case <-timeoutChan:
 			timeout = true
+			debugf(meth, kv.me, "timeout!, req: %v", toJson(req))
 		default:
 			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
 		}
@@ -235,6 +233,7 @@ func (kv *KVServer) Append(req *PutAppendArgs, resp *PutAppendReply) {
 		debugf(meth, kv.me, "timeout!, req: %v", toJson(req))
 		return
 	}
+	debugf(meth, kv.me, "success, req: %v", toJson(req))
 	return
 }
 
@@ -280,6 +279,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 	kv.data = map[string]string{}
+	kv.versionData = map[string]string{}
 	kv.executed = map[string]bool{}
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)

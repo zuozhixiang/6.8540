@@ -57,6 +57,7 @@ const (
 	SendGet      Method = "SendGet"
 	SendPut      Method = "SendPut"
 	SendApp      Method = "SendApp"
+	Apply        Method = "Apply"
 )
 
 var Len int
@@ -71,7 +72,7 @@ func debugf(meth Method, me int, format string, a ...interface{}) {
 		_, file, line, _ := runtime.Caller(1)
 		pos := fmt.Sprintf("%v:%v", file[Len:], line) // print log code line
 		info := fmt.Sprintf("[S%v]", me)
-		fmt := "%-13v %-7v %-22v " + format
+		fmt := "%-16v %-7v %-22v " + format
 
 		x := []interface{}{pos, meth, info}
 		x = append(x, a...)
@@ -80,7 +81,7 @@ func debugf(meth Method, me int, format string, a ...interface{}) {
 }
 
 func startTimeout(cond *sync.Cond, timeoutChan chan bool) {
-	timeout := time.After(1 * time.Second)
+	timeout := time.After(1000 * time.Millisecond)
 	select {
 	case <-timeout:
 		{

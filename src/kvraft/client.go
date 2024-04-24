@@ -48,10 +48,10 @@ func (ck *Clerk) Get(key string) string {
 	resp := &GetReply{}
 	for {
 		resp = &GetReply{}
-		debugf(SendGet, int(ck.ClientID), "->[S%v]req: %v", ck.LeaderID, toJson(req))
+		debugf(SendGet, int(ck.ClientID), "req: %v", toJson(req))
 		ok := ck.servers[ck.LeaderID].Call(rpcname, req, resp)
-		if ok && resp.Err == ErrWrongLeader {
-			debugf(SendGet, int(ck.ClientID), "->[S%v] fail, id: %v, resp: %v", ck.LeaderID, req.ID, toJson(resp))
+		if ok && (resp.Err == ErrWrongLeader || resp.Err == ErrTimeout) {
+			debugf(SendGet, int(ck.ClientID), "fail, id: %v, resp: %v", req.ID, toJson(resp))
 			ok = false
 		}
 		if !ok {
@@ -60,7 +60,7 @@ func (ck *Clerk) Get(key string) string {
 			break
 		}
 	}
-	debugf(SendGet, int(ck.ClientID), "->[S%v] success, id: %v, resp: %v", ck.LeaderID, req.ID, toJson(resp))
+	debugf(SendGet, int(ck.ClientID), "success, id: %v, resp: %v", req.ID, toJson(resp))
 	return resp.Value
 }
 
@@ -87,10 +87,10 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	resp := &PutAppendReply{}
 	for {
 		resp = &PutAppendReply{}
-		debugf(m, int(ck.ClientID), "->[S%v] req: %v", ck.LeaderID, toJson(req))
+		debugf(m, int(ck.ClientID), "req: %v", toJson(req))
 		ok := ck.servers[ck.LeaderID].Call(rpcname, req, resp)
-		if ok && resp.Err == ErrWrongLeader {
-			debugf(m, int(ck.ClientID), "->[S%v] fail, id: %v, resp: %v", ck.LeaderID, req.ID, toJson(resp))
+		if ok && (resp.Err == ErrWrongLeader || resp.Err == ErrTimeout) {
+			debugf(m, int(ck.ClientID), "fail, id: %v, resp: %v", req.ID, toJson(resp))
 			ok = false
 		}
 		if !ok {
@@ -99,7 +99,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			break
 		}
 	}
-	debugf(m, int(ck.ClientID), "->[S%v] success, id: %v, resp: %v", ck.LeaderID, req.ID, toJson(resp))
+	debugf(m, int(ck.ClientID), "success, id: %v, resp: %v", req.ID, toJson(resp))
 	// notify server delete memory
 }
 
