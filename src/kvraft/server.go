@@ -14,6 +14,7 @@ const (
 	GetType OpType = iota
 	AppendType
 	PutType
+	DeleteType
 )
 
 type Op struct {
@@ -240,6 +241,56 @@ func (kv *KVServer) Append(req *PutAppendArgs, resp *PutAppendReply) {
 	}
 	debugf(meth, kv.me, "success, req: %v", toJson(req))
 	return
+}
+
+func (kv *KVServer) Notify(req *NotifyFinishedRequest, resp *NotifyFinishedResponse) {
+	if kv.killed() {
+		return
+	}
+	kv.lock()
+	defer kv.unlock()
+	m := Notify
+	if !kv.isLeader() {
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		resp.Err = ErrWrongLeader
+		return
+	}
+	resp.Err = OK
+
+	op := Op{
+		Type: DeleteType,
+		Key:  req.ID,
+	}
+	debugf(m, kv.me, "start delete: %v", req.ID)
+	index, term, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		resp.Err = ErrWrongLeader
+		return
+	}
+	debugf(m, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
+	timeoutChan := make(chan bool, 1)
+	go startTimeout(kv.cond, timeoutChan)
+	timeout := false
+	for !(index <= kv.lastAppliedIndex) && !timeout {
+		select {
+		case <-timeoutChan:
+			timeout = true
+		default:
+			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
+		}
+	}
+	if !kv.isLeader() {
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		resp.Err = ErrWrongLeader
+		return
+	}
+	if timeout {
+		resp.Err = ErrTimeout
+		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
+		return
+	}
+	debugf(m, kv.me, "success, req:%v", toJson(req))
 }
 
 // the tester calls Kill() when a KVServer instance won't

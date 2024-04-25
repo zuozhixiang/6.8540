@@ -62,6 +62,8 @@ const (
 	AppSnap      Method = "AppSnap"
 	MakeSnap     Method = "MakeSnap"
 	Start        Method = "Start1"
+	SendNotify   Method = "SendNoti"
+	Notify       Method = "Notify"
 )
 
 var Len int

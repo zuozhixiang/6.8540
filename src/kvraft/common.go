@@ -33,3 +33,11 @@ type GetReply struct {
 	Err   string
 	Value string
 }
+
+type NotifyFinishedRequest struct {
+	ID string
+}
+
+type NotifyFinishedResponse struct {
+	Err string
+}

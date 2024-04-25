@@ -4,18 +4,25 @@ func (kv *KVServer) executeOp(op Op) {
 	switch op.Type {
 	case PutType:
 		{
+			kv.executed[op.ID] = true
 			kv.data[op.Key] = op.Value
 		}
 	case AppendType:
 		{
+			kv.executed[op.ID] = true
 			kv.data[op.Key] = kv.data[op.Key] + op.Value
 		}
 	case GetType:
 		{
+			kv.executed[op.ID] = true
 			kv.versionData[op.ID] = kv.data[op.Key]
 		}
+	case DeleteType:
+		{
+			delete(kv.executed, op.Key)
+		}
 	}
-	kv.executed[op.ID] = true
+
 }
 
 func (kv *KVServer) applyMsgForStateMachine() {

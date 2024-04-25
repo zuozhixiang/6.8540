@@ -61,6 +61,7 @@ func (ck *Clerk) Get(key string) string {
 		}
 	}
 	debugf(SendGet, int(ck.ClientID), "success, id: %v, resp: %v", req.ID, toJson(resp))
+	// ck.Notify(req.ID)
 	return resp.Value
 }
 
@@ -101,6 +102,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	}
 	debugf(m, int(ck.ClientID), "success, id: %v, resp: %v", req.ID, toJson(resp))
 	// notify server delete memory
+	// ck.Notify(req.ID)
 }
 
 func (ck *Clerk) Put(key string, value string) {
@@ -108,4 +110,28 @@ func (ck *Clerk) Put(key string, value string) {
 }
 func (ck *Clerk) Append(key string, value string) {
 	ck.PutAppend(key, value, "Append")
+}
+
+func (ck *Clerk) Notify(ID string) {
+	rpcname := "KVServer." + "Notify"
+	m := SendNotify
+	req := &NotifyFinishedRequest{
+		ID: ID,
+	}
+	resp := &NotifyFinishedResponse{}
+	for {
+		resp = &NotifyFinishedResponse{}
+		debugf(m, int(ck.ClientID), "req: %v", toJson(req))
+		ok := ck.servers[ck.LeaderID].Call(rpcname, req, resp)
+		if ok && (resp.Err == ErrWrongLeader || resp.Err == ErrTimeout) {
+			debugf(m, int(ck.ClientID), "fail, id: %v, resp: %v", req.ID, toJson(resp))
+			ok = false
+		}
+		if !ok {
+			ck.LeaderID = (ck.LeaderID + 1) % len(ck.servers)
+		} else {
+			break
+		}
+	}
+	debugf(m, int(ck.ClientID), "success, id: %v, resp: %v", req.ID, toJson(resp))
 }
