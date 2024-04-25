@@ -1,6 +1,8 @@
 package kvraft
 
 import (
+	"6.5840/labgob"
+	"bytes"
 	"fmt"
 	"sync"
 	"testing"
@@ -40,4 +42,20 @@ func TestCondTiemout(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestGob(t *testing.T) {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	data := map[string]string{"zzx": "123", "xxx": "12344"}
+	e.Encode(data)
+	x := w.Bytes()
+	fmt.Println(string(x))
+
+	r := bytes.NewBuffer(x)
+	d := labgob.NewDecoder(r)
+	var xx map[string]string
+	d.Decode(&xx)
+
+	fmt.Println(xx)
 }

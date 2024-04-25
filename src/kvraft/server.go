@@ -41,6 +41,7 @@ type KVServer struct {
 	versionData      map[string]string
 	lastAppliedIndex int
 	cond             *sync.Cond
+	persiter         *raft.Persister
 }
 
 func (kv *KVServer) lock() {
@@ -286,11 +287,13 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.versionData = map[string]string{}
 	kv.executed = map[string]bool{}
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	kv.persiter = persister
 	kv.lastAppliedIndex = 0
+	kv.applySnapshot(persister.ReadSnapshot())
 	kv.cond = sync.NewCond(&kv.mu)
-
+	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 	// You may need initialization code here.
 	go kv.applyMsgForStateMachine()
+	go kv.dectionMaxSize()
 	return kv
 }
