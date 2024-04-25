@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const Debug = false
+const Debug = true
 
 var logger *zap.SugaredLogger
 
@@ -44,6 +44,7 @@ func nrand() int64 {
 	max := big.NewInt(int64(1) << 62)
 	bigx, _ := rand.Int(rand.Reader, max)
 	x := bigx.Int64()
+
 	return x
 }
 
@@ -58,6 +59,9 @@ const (
 	SendPut      Method = "SendPut"
 	SendApp      Method = "SendApp"
 	Apply        Method = "Apply"
+	AppSnap      Method = "AppSnap"
+	MakeSnap     Method = "MakeSnap"
+	Start        Method = "Start1"
 )
 
 var Len int
@@ -72,7 +76,7 @@ func debugf(meth Method, me int, format string, a ...interface{}) {
 		_, file, line, _ := runtime.Caller(1)
 		pos := fmt.Sprintf("%v:%v", file[Len:], line) // print log code line
 		info := fmt.Sprintf("[S%v]", me)
-		fmt := "%-16v %-7v %-22v " + format
+		fmt := "%-16v %-8v %-22v " + format
 
 		x := []interface{}{pos, meth, info}
 		x = append(x, a...)

@@ -48,7 +48,9 @@ func TestGob(t *testing.T) {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	data := map[string]string{"zzx": "123", "xxx": "12344"}
+	data1 := map[string]string{"zzx1": "123", "xxx1": "12344"}
 	e.Encode(data)
+	e.Encode(data1)
 	x := w.Bytes()
 	fmt.Println(string(x))
 
@@ -57,5 +59,7 @@ func TestGob(t *testing.T) {
 	var xx map[string]string
 	d.Decode(&xx)
 
-	fmt.Println(xx)
+	var xx1 map[string]string
+	d.Decode(&xx1)
+	fmt.Println(xx, xx1)
 }

@@ -291,6 +291,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.lastAppliedIndex = 0
 	kv.applySnapshot(persister.ReadSnapshot())
 	kv.cond = sync.NewCond(&kv.mu)
+	debugf(Start, kv.me, "data: %v", toJson(kv.data))
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 	// You may need initialization code here.
 	go kv.applyMsgForStateMachine()

@@ -38,11 +38,11 @@ func (kv *KVServer) applyMsgForStateMachine() {
 					continue
 				}
 				kv.executeOp(op)
-
 				debugf(Apply, kv.me, "msg: %v", toJson(msg))
 			} else {
 				lastApplied = msg.SnapshotIndex
 				kv.applySnapshot(msg.Snapshot)
+				debugf(AppSnap, kv.me, "snapIndex: %v, snapTerm: %v", msg.SnapshotIndex, msg.SnapshotTerm)
 			}
 		}
 		kv.lastAppliedIndex = lastApplied
