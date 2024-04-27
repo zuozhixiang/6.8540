@@ -1,6 +1,9 @@
 package kvraft
 
-import "fmt"
+import (
+	"6.5840/raft"
+	"fmt"
+)
 
 func (kv *KVServer) executeOp(op Op) string {
 	switch op.Type {
@@ -54,6 +57,12 @@ func (kv *KVServer) applyMsgForStateMachine() {
 			isNotify = true
 
 			if msg.CommandValid {
+				if msg.CommandIndex <= lastApplied {
+					errmsg := fmt.Sprintf("[S%v], msg index: %v, lastApplied: %v, msg: %v", kv.me, msg.CommandIndex, lastApplied, msg)
+					// panic(errmsg)
+					fmt.Println(errmsg)
+					continue
+				}
 				lastApplied = msg.CommandIndex
 				op := msg.Command.(Op)
 				if kv.checkExecuted(op.ID) {
@@ -61,8 +70,12 @@ func (kv *KVServer) applyMsgForStateMachine() {
 				}
 				res := kv.executeOp(op)
 				op.Value = res
-				debugf(Apply, kv.me, "%v", formatCmd(op))
+				debugf(Apply, kv.me, "idx: %v, %v", msg.CommandIndex, formatCmd(op))
 			} else {
+				if msg.SnapshotIndex <= lastApplied {
+					errmsg := fmt.Sprintf("[S%v], snapshot index: %v, lastApplied: %v, msg: %v", kv.me, msg.SnapshotIndex, lastApplied, raft.GetPrintMsg([]raft.ApplyMsg{msg}))
+					panic(errmsg)
+				}
 				lastApplied = msg.SnapshotIndex
 				kv.applySnapshot(msg.Snapshot)
 				debugf(AppSnap, kv.me, "snapIndex: %v, snapTerm: %v", msg.SnapshotIndex, msg.SnapshotTerm)
