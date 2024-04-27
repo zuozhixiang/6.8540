@@ -70,6 +70,7 @@ type Raft struct {
 	SnapshotData      []byte
 	LastIncludedIndex int
 	LastIncludedTerm  int32
+	NeedSendMsg       *ApplyMsg
 }
 
 func (rf *Raft) Lock() {

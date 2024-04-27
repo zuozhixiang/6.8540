@@ -59,7 +59,7 @@ func (kv *KVServer) applyMsgForStateMachine() {
 			if msg.CommandValid {
 				if msg.CommandIndex <= lastApplied {
 					errmsg := fmt.Sprintf("[S%v], msg index: %v, lastApplied: %v, msg: %v", kv.me, msg.CommandIndex, lastApplied, msg)
-					// panic(errmsg)
+					panic(errmsg)
 					fmt.Println(errmsg)
 					continue
 				}
@@ -75,6 +75,7 @@ func (kv *KVServer) applyMsgForStateMachine() {
 				if msg.SnapshotIndex <= lastApplied {
 					errmsg := fmt.Sprintf("[S%v], snapshot index: %v, lastApplied: %v, msg: %v", kv.me, msg.SnapshotIndex, lastApplied, raft.GetPrintMsg([]raft.ApplyMsg{msg}))
 					panic(errmsg)
+					continue
 				}
 				lastApplied = msg.SnapshotIndex
 				kv.applySnapshot(msg.Snapshot)
