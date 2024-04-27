@@ -80,6 +80,12 @@ func (rf *Raft) InstallSnapshot(req *InstallSnapshotRequest, resp *InstallSnapsh
 			rf.LastIncludedIndex, getJsonReq(req))
 		return
 	}
+	if rf.LastApplied >= req.LastIncludedIndex {
+		// snapshot already in this server
+		rf.debugf(ReciveSnap, "Leader[S%v] snapshot already in, applyIncludedIndex:%v, req: %v", req.LeaderID,
+			rf.LastIncludedIndex, getJsonReq(req))
+		return
+	}
 	lastLogIndex := rf.Logs.GetLastIndex()
 	if req.LastIncludedIndex >= lastLogIndex {
 		rf.Logs.LogData = []LogEntry{{Term: req.LastIncludedTerm}}
@@ -108,6 +114,7 @@ func (rf *Raft) InstallSnapshot(req *InstallSnapshotRequest, resp *InstallSnapsh
 		SnapshotTerm:  int(req.LastIncludedTerm),
 		SnapshotIndex: req.LastIncludedIndex,
 	}
+	logger.Infof("S[%v], send snapshot, data: %v", rf.me, GetPrintMsg([]ApplyMsg{msg}))
 	rf.applyChan <- msg
 }
 

@@ -203,7 +203,7 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, nextIndex int
 				req.PrevLogTerm = rf.Logs.GetEntry(req.PrevLogIndex).Term
 				nextIndex = rf.Logs.GetLastIndex() + 1
 				req.Entries = rf.Logs.GetSlice(rf.NextIndex[server], nextIndex-1)
-				logger.Infof("retry, id: %v, conflictedIndex: %v, term:%v, nextIndex: %v", req.ID, resp.FirstConflictingIndex,
+				rf.infof("retry, id: %v, conflictedIndex: %v, term:%v, nextIndex: %v", req.ID, resp.FirstConflictingIndex,
 					resp.ConflictingTerm, rf.NextIndex[server])
 				go rf.SendLogData(server, req, nextIndex)
 			}

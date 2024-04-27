@@ -21,7 +21,7 @@ type ApplyMsg struct {
 	SnapshotIndex int    `json:"SnapshotIndex,omitempty"`
 }
 
-func getPrintMsg(msgs []ApplyMsg) string {
+func GetPrintMsg(msgs []ApplyMsg) string {
 	res := []ApplyMsg{}
 	for _, msg := range msgs {
 		res = append(res, ApplyMsg{
@@ -56,8 +56,9 @@ func (rf *Raft) apply() {
 		needApplyMsg = append(needApplyMsg, msg)
 	}
 	if len(needApplyMsg) > 0 {
-		rf.debugf(ApplyMess, "commitIndex:%v, lastApplied: %v, len: %v, data: %+v", rf.CommitIndex, rf.LastApplied, len(needApplyMsg), getPrintMsg(needApplyMsg))
+		rf.debugf(ApplyMess, "commitIndex:%v, lastApplied: %v, len: %v, data: %+v", rf.CommitIndex, rf.LastApplied, len(needApplyMsg), GetPrintMsg(needApplyMsg))
 	}
+	// me := rf.me
 	rf.Unlock()
 	// this for , do not exec hold lock, it come to dead lock, beacase, applychan is full, and then can not release lock.
 	for _, msg := range needApplyMsg {
@@ -67,6 +68,7 @@ func (rf *Raft) apply() {
 			continue
 		}
 		rf.Unlock()
+		// logger.Infof("[S%v], send cmd: %v", me, GetPrintMsg([]ApplyMsg{msg}))
 		rf.applyChan <- msg
 		rf.Lock()
 		if msg.CommandIndex != rf.LastApplied+1 {
@@ -75,6 +77,14 @@ func (rf *Raft) apply() {
 		}
 		rf.LastApplied = msg.CommandIndex
 		rf.Unlock()
+		//rf.Lock()
+		//if msg.CommandIndex != rf.LastApplied+1 {
+		//	rf.Unlock()
+		//	continue
+		//}
+		//rf.applyChan <- msg
+		//rf.LastApplied = msg.CommandIndex
+		//rf.Unlock()
 	}
 }
 
