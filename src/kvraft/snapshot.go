@@ -12,7 +12,7 @@ func (kv *KVServer) dectionMaxSize() {
 	}
 	maxsize := kv.maxraftstate
 	for !kv.killed() {
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		kv.lock()
 		size := kv.persiter.RaftStateSize()
 		if size >= kv.maxraftstate {

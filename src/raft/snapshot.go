@@ -115,7 +115,7 @@ func (rf *Raft) InstallSnapshot(req *InstallSnapshotRequest, resp *InstallSnapsh
 		SnapshotIndex: req.LastIncludedIndex,
 	}
 	rf.NeedSendMsg = &msg
-	logger.Infof("S[%v], send snapshot, data: %v", rf.me, GetPrintMsg([]ApplyMsg{msg}))
+	rf.debugf(ReciveSnap, "need to apply snapshot: %v", GetPrintMsg([]ApplyMsg{msg}))
 	// rf.applyChan <- msg
 	rf.cond.Signal()
 }

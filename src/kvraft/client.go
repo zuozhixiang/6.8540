@@ -64,7 +64,7 @@ func (ck *Clerk) Get(key string) string {
 		debugf(SendGet, int(ck.ClientID), "warn id: %v, get key[%v], value is empty", req.ID, req.Key)
 	}
 	debugf(SendGet, int(ck.ClientID), "success, req: %v, resp: %v", toJson(req), toJson(resp))
-	// ck.Notify(req.ID)
+	go ck.Notify(req.ID)
 	return resp.Value
 }
 
@@ -105,7 +105,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	}
 	debugf(m, int(ck.ClientID), "success, req: %v, resp: %v", toJson(req), toJson(resp))
 	// notify server delete memory
-	// ck.Notify(req.ID)
+	go ck.Notify(req.ID)
 }
 
 func (ck *Clerk) Put(key string, value string) {

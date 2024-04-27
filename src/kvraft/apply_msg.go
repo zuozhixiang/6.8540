@@ -25,10 +25,11 @@ func (kv *KVServer) executeOp(op Op) string {
 			kv.versionData[op.ID] = kv.data[op.Key]
 			return kv.data[op.Key]
 		}
-		//case DeleteType:
-		//	{
-		//		delete(kv.executed, op.Key)
-		//	}
+	case DeleteType:
+		{
+			delete(kv.executed, op.Key)
+			delete(kv.versionData, op.Key)
+		}
 	}
 	return ""
 }
@@ -37,6 +38,7 @@ var opmap = map[OpType]string{
 	GetType:    string(GetMethod),
 	PutType:    string(PutMethod),
 	AppendType: string(AppendMethod),
+	DeleteType: "Delete",
 }
 
 func formatCmd(op Op) string {

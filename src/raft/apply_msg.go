@@ -52,9 +52,6 @@ func (rf *Raft) apply() {
 		//rf.LastApplied = msg.SnapshotIndex
 		// rf.CommitIndex = max(msg.SnapshotIndex, rf.CommitIndex)
 		needApplyMsg = append(needApplyMsg, msg)
-		if len(needApplyMsg) > 0 {
-			logger.Infof("send snap, %v", GetPrintMsg(needApplyMsg))
-		}
 		rf.NeedSendMsg = nil
 	} else {
 		for rf.CommitIndex > tempLastApplied {
