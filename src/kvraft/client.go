@@ -45,11 +45,11 @@ func (ck *Clerk) Get(key string) string {
 		ID:  ck.getNextRequestID(),
 		Key: key,
 	}
-	resp := &GetReply{}
+	resp := GetReply{}
 	for {
-		resp = &GetReply{}
+		resp = GetReply{}
 		debugf(SendGet, int(ck.ClientID), "req: %v", toJson(req))
-		ok := ck.servers[ck.LeaderID].Call(rpcname, req, resp)
+		ok := ck.servers[ck.LeaderID].Call(rpcname, req, &resp)
 		if ok && (resp.Err == ErrWrongLeader || resp.Err == ErrTimeout) {
 			debugf(SendGet, int(ck.ClientID), "fail, id: %v, resp: %v", req.ID, toJson(resp))
 			ok = false
@@ -60,7 +60,10 @@ func (ck *Clerk) Get(key string) string {
 			break
 		}
 	}
-	debugf(SendGet, int(ck.ClientID), "success, id: %v, resp: %v", req.ID, toJson(resp))
+	if resp.Value == "" {
+		debugf(SendGet, int(ck.ClientID), "warn id: %v, get key[%v], value is empty", req.ID, req.Key)
+	}
+	debugf(SendGet, int(ck.ClientID), "success, req: %v, resp: %v", toJson(req), toJson(resp))
 	// ck.Notify(req.ID)
 	return resp.Value
 }
@@ -100,7 +103,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			break
 		}
 	}
-	debugf(m, int(ck.ClientID), "success, id: %v, resp: %v", req.ID, toJson(resp))
+	debugf(m, int(ck.ClientID), "success, req: %v, resp: %v", toJson(req), toJson(resp))
 	// notify server delete memory
 	// ck.Notify(req.ID)
 }
@@ -133,5 +136,5 @@ func (ck *Clerk) Notify(ID string) {
 			break
 		}
 	}
-	debugf(m, int(ck.ClientID), "success, id: %v, resp: %v", req.ID, toJson(resp))
+	debugf(m, int(ck.ClientID), "success, req: %v, resp: %v", toJson(req), toJson(resp))
 }

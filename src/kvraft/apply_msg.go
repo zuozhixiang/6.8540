@@ -1,28 +1,43 @@
 package kvraft
 
-func (kv *KVServer) executeOp(op Op) {
+import "fmt"
+
+func (kv *KVServer) executeOp(op Op) string {
 	switch op.Type {
 	case PutType:
 		{
 			kv.executed[op.ID] = true
 			kv.data[op.Key] = op.Value
+			return op.Value
 		}
 	case AppendType:
 		{
 			kv.executed[op.ID] = true
 			kv.data[op.Key] = kv.data[op.Key] + op.Value
+			return kv.data[op.Key]
 		}
 	case GetType:
 		{
 			kv.executed[op.ID] = true
 			kv.versionData[op.ID] = kv.data[op.Key]
+			return kv.data[op.Key]
 		}
-	case DeleteType:
-		{
-			delete(kv.executed, op.Key)
-		}
+		//case DeleteType:
+		//	{
+		//		delete(kv.executed, op.Key)
+		//	}
 	}
+	return ""
+}
 
+var opmap = map[OpType]string{
+	GetType:    string(GetMethod),
+	PutType:    string(PutMethod),
+	AppendType: string(AppendMethod),
+}
+
+func formatCmd(op Op) string {
+	return fmt.Sprintf("[%v][%v][%v][%v]", op.ID, opmap[op.Type], op.Key, op.Value)
 }
 
 func (kv *KVServer) applyMsgForStateMachine() {
@@ -44,8 +59,9 @@ func (kv *KVServer) applyMsgForStateMachine() {
 				if kv.checkExecuted(op.ID) {
 					continue
 				}
-				kv.executeOp(op)
-				debugf(Apply, kv.me, "msg: %v", toJson(msg))
+				res := kv.executeOp(op)
+				op.Value = res
+				debugf(Apply, kv.me, "%v", formatCmd(op))
 			} else {
 				lastApplied = msg.SnapshotIndex
 				kv.applySnapshot(msg.Snapshot)

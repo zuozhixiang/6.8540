@@ -27,14 +27,17 @@ func (kv *KVServer) dectionMaxSize() {
 func (kv *KVServer) dumpData() []byte {
 	w := new(bytes.Buffer)
 	d := labgob.NewEncoder(w)
-	err := d.Encode(kv.data)
-	if err != nil {
-		return nil
+	var err error
+	if err = d.Encode(kv.data); err != nil {
+		panic("decode fail")
 	}
-	err = d.Encode(kv.executed)
-	if err != nil {
-		return nil
+	if err = d.Encode(kv.executed); err != nil {
+		panic("decode fail")
 	}
+	if err = d.Encode(kv.versionData); err != nil {
+		panic(err)
+	}
+
 	return w.Bytes()
 }
 
@@ -46,6 +49,7 @@ func (kv *KVServer) applySnapshot(data []byte) {
 	d := labgob.NewDecoder(r)
 	var newState map[string]string
 	var executed map[string]bool
+	var versionData map[string]string
 	if err := d.Decode(&newState); err != nil {
 		panic(err)
 	} else {
@@ -55,5 +59,10 @@ func (kv *KVServer) applySnapshot(data []byte) {
 		panic(err)
 	} else {
 		kv.executed = executed
+	}
+	if err := d.Decode(&versionData); err != nil {
+		panic(err)
+	} else {
+		kv.versionData = versionData
 	}
 }

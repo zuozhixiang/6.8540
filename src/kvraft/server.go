@@ -81,7 +81,11 @@ func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 	}
 	resp.Err = OK
 	if kv.checkExecuted(req.ID) {
+		if _, ok := kv.versionData[req.ID]; !ok {
+			panic("1")
+		}
 		resp.Value = kv.versionData[req.ID]
+		debugf(m, kv.me, "Executed, id: %v", req.ID)
 		return
 	}
 
@@ -120,7 +124,13 @@ func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
 		return
 	}
+	if _, ok := kv.versionData[op.ID]; !ok {
+		panic("empty")
+	}
 	res := kv.versionData[op.ID]
+	if res == "" {
+		debugf(m, kv.me, "warning, req:%v", toJson(req))
+	}
 	debugf(m, kv.me, "success, req: %v, value: %v", toJson(req), res)
 	resp.Value = res
 }
