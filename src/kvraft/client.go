@@ -7,8 +7,7 @@ import (
 )
 
 type Clerk struct {
-	servers []*labrpc.ClientEnd
-	// You will have to modify this struct.
+	servers      []*labrpc.ClientEnd
 	LeaderID     int // client need to know who is leader, leaderID maybe incorrect
 	ClientID     int64
 	GenRequestID atomic.Int64

@@ -18,9 +18,6 @@ const (
 )
 
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
 	ID    string
 	Type  OpType
 	Key   string
@@ -36,13 +33,12 @@ type KVServer struct {
 
 	maxraftstate int // snapshot if log grows this big
 
-	// Your definitions here.
-	data             map[string]string
-	executed         map[string]bool
-	versionData      map[string]string
+	data             map[string]string // state machine data
+	executed         map[string]bool   // executed requestId
+	versionData      map[string]string // requestID to data
 	lastAppliedIndex int
-	cond             *sync.Cond
-	persiter         *raft.Persister
+	cond             *sync.Cond      // condition variale
+	persiter         *raft.Persister // persist util
 }
 
 func (kv *KVServer) lock() {
@@ -175,7 +171,7 @@ func (kv *KVServer) Put(req *PutAppendArgs, resp *PutAppendReply) {
 	for !(index <= kv.lastAppliedIndex) && !timeout {
 		select {
 		case <-timeoutChan:
-			timeout = true
+			timeout = true // timeout notify, raft can not do a agreement
 		default:
 			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
 		}
@@ -233,7 +229,7 @@ func (kv *KVServer) Append(req *PutAppendArgs, resp *PutAppendReply) {
 	for !(index <= kv.lastAppliedIndex) && !timeout {
 		select {
 		case <-timeoutChan:
-			timeout = true
+			timeout = true // timeout notify, raft can not do a agreement
 			debugf(meth, kv.me, "timeout!, req: %v", toJson(req))
 		default:
 			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
@@ -285,7 +281,7 @@ func (kv *KVServer) Notify(req *NotifyFinishedRequest, resp *NotifyFinishedRespo
 	for !(index <= kv.lastAppliedIndex) && !timeout {
 		select {
 		case <-timeoutChan:
-			timeout = true
+			timeout = true // timeout notify, raft can not do a agreement
 		default:
 			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
 		}
@@ -314,7 +310,6 @@ func (kv *KVServer) Notify(req *NotifyFinishedRequest, resp *NotifyFinishedRespo
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
-	// Your code here, if desired.
 	debugf(KILL, kv.me, "be killed")
 }
 
@@ -343,7 +338,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 
-	// You may need initialization code here.
 	kv.data = map[string]string{}
 	kv.versionData = map[string]string{}
 	kv.executed = map[string]bool{}
@@ -354,7 +348,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.cond = sync.NewCond(&kv.mu)
 	debugf(Start, kv.me, "data: %v, executed: %v, versionData:%v", toJson(kv.data), toJson(kv.executed), toJson(kv.versionData))
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-	// You may need initialization code here.
+
 	go kv.applyMsgForStateMachine()
 	go kv.dectionMaxSize()
 	return kv
