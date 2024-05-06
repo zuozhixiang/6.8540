@@ -1,31 +1,33 @@
-import datetime
+
 import itertools
 import math
-import os
-import shutil
 import signal
 import subprocess
-import sys
 import tempfile
+import shutil
 import time
+import os
+import sys
+import datetime
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Dict
-
+from typing import List, Optional, Dict, DefaultDict, Tuple
 import typer
+import rich
 from rich import print
-from rich.live import Live
-from rich.panel import Panel
+from rich.table import Table
 from rich.progress import (
     Progress,
     TimeElapsedColumn,
     TimeRemainingColumn,
+    TextColumn,
     BarColumn,
     SpinnerColumn,
 )
-from rich.table import Table
+from rich.live import Live
+from rich.panel import Panel
 from rich.traceback import install
 
 install(show_locals=True)
@@ -97,7 +99,7 @@ def print_results(results: Dict[str, Dict[str, StatsMeter]], timing=False):
 
 
 def run_test(test: str, race: bool, timing: bool):
-    test_cmd = ["time", "go", "test", f"-run={test}"]
+    test_cmd = ["go", "test", f"-run={test}"]
     if race:
         test_cmd.append("-race")
     if timing:
@@ -122,18 +124,19 @@ def last_line(file: str) -> str:
 # fmt: off
 def run_tests(
         tests: List[str],
-        sequential: bool = typer.Option(False, '--sequential', '-s', help='Run all test of each group in order'),
-        workers: int = typer.Option(1, '--workers', '-p', help='Number of parallel tasks'),
-        iterations: int = typer.Option(10, '--iter', '-n', help='Number of iterations to run'),
-        output: Optional[Path] = typer.Option(None, '--output', '-o', help='Output path to use'),
-        verbose: int = typer.Option(0, '--verbose', '-v', help='Verbosity level', count=True),
-        archive: bool = typer.Option(False, '--archive', '-a', help='Save all logs intead of only failed ones'),
-        race: bool = typer.Option(False, '--race/--no-race', '-r/-R', help='Run with race checker'),
-        loop: bool = typer.Option(False, '--loop', '-l', help='Run continuously'),
-        growth: int = typer.Option(10, '--growth', '-g', help='Growth ratio of iterations when using --loop'),
-        timing: bool = typer.Option(False, '--timing', '-t', help='Report timing, only works on macOS'),
+        sequential: bool       = typer.Option(False,  '--sequential',      '-s',    help='Run all test of each group in order'),
+        workers: int           = typer.Option(1,      '--workers',         '-p',    help='Number of parallel tasks'),
+        iterations: int        = typer.Option(10,     '--iter',            '-n',    help='Number of iterations to run'),
+        output: Optional[Path] = typer.Option(None,   '--output',          '-o',    help='Output path to use'),
+        verbose: int           = typer.Option(0,      '--verbose',         '-v',    help='Verbosity level', count=True),
+        archive: bool          = typer.Option(False,  '--archive',         '-a',    help='Save all logs intead of only failed ones'),
+        race: bool             = typer.Option(False,  '--race/--no-race',  '-r/-R', help='Run with race checker'),
+        loop: bool             = typer.Option(False,  '--loop',            '-l',    help='Run continuously'),
+        growth: int            = typer.Option(10,     '--growth',          '-g',    help='Growth ratio of iterations when using --loop'),
+        timing: bool           = typer.Option(False,   '--timing',          '-t',    help='Report timing, only works on macOS'),
         # fmt: on
 ):
+
     if output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         output = Path(timestamp)
@@ -195,7 +198,7 @@ def run_tests(
                 while completed < total:
                     n = len(futures)
                     if n < workers:
-                        for test in itertools.islice(test_instances, workers - n):
+                        for test in itertools.islice(test_instances, workers-n):
                             futures.append(executor.submit(run_test, test, race, timing))
 
                     done, not_done = wait(futures, return_when=FIRST_COMPLETED)
@@ -221,7 +224,7 @@ def run_tests(
 
                         if timing:
                             line = last_line(path)
-                            real, _, user, _, system, _ = line.replace(' ' * 8, '').split(' ')
+                            real, _, user, _, system, _ = line.replace(' '*8, '').split(' ')
                             results[test]['real_time'].add(float(real))
                             results[test]['user_time'].add(float(user))
                             results[test]['system_time'].add(float(system))

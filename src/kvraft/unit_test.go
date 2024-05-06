@@ -33,6 +33,7 @@ func TestCondTiemout(t *testing.T) {
 		select {
 		case <-timeoutChan:
 			flag = true
+			fmt.Println("timeout")
 		default:
 			{
 				mutex.Lock()

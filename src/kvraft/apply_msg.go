@@ -46,6 +46,51 @@ func formatCmd(op Op) string {
 }
 
 func (kv *KVServer) applyMsgForStateMachine() {
+
+	for {
+		if kv.killed() {
+			return
+		}
+		msg := <-kv.applyCh
+		needApplyMsg := []raft.ApplyMsg{msg}
+		size := len(kv.applyCh)
+		for i := 0; i < size; i++ {
+			needApplyMsg = append(needApplyMsg, <-kv.applyCh)
+		}
+		kv.lock()
+		lastApplied := kv.lastAppliedIndex
+		for _, msg := range needApplyMsg {
+			if msg.CommandValid {
+				if msg.CommandIndex <= lastApplied {
+					errmsg := fmt.Sprintf("[S%v], msg index: %v, lastApplied: %v, msg: %v", kv.me, msg.CommandIndex, lastApplied, msg)
+					panic(errmsg)
+				}
+				lastApplied = msg.CommandIndex
+				op := msg.Command.(Op)
+				if kv.checkExecuted(op.ID) {
+					continue
+				}
+				res := kv.executeOp(op)
+				op.Value = res
+				debugf(Apply, kv.me, "idx: %v, %v", msg.CommandIndex, formatCmd(op))
+			} else {
+				if msg.SnapshotIndex <= lastApplied {
+					errmsg := fmt.Sprintf("[S%v], snapshot index: %v, lastApplied: %v, msg: %v", kv.me, msg.SnapshotIndex, lastApplied, raft.GetPrintMsg([]raft.ApplyMsg{msg}))
+					panic(errmsg)
+				}
+				lastApplied = msg.SnapshotIndex
+				kv.applySnapshot(msg.Snapshot)
+				debugf(AppSnap, kv.me, "snapIndex: %v, snapTerm: %v", msg.SnapshotIndex, msg.SnapshotTerm)
+			}
+		}
+		kv.lastAppliedIndex = lastApplied
+		kv.cond.Broadcast()
+		kv.unlock()
+		//if len(kv.applyCh) == 0 {
+		//	time.Sleep(10 * time.Millisecond)
+		//}
+	}
+
 	for !kv.killed() {
 		kv.lock()
 		size := len(kv.applyCh)
@@ -57,7 +102,6 @@ func (kv *KVServer) applyMsgForStateMachine() {
 				panic("chan close")
 			}
 			isNotify = true
-
 			if msg.CommandValid {
 				if msg.CommandIndex <= lastApplied {
 					errmsg := fmt.Sprintf("[S%v], msg index: %v, lastApplied: %v, msg: %v", kv.me, msg.CommandIndex, lastApplied, msg)

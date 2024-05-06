@@ -86,9 +86,13 @@ func debugf(meth Method, me int, format string, a ...interface{}) {
 	}
 }
 
-const timeOut = "timeout"
-
 func startTimeout(cond *sync.Cond, timeoutChan chan bool) {
-	time.Sleep(600 * time.Millisecond)
-	timeoutChan <- true
+	timeout := time.After(600 * time.Millisecond)
+	select {
+	case <-timeout:
+		{
+			timeoutChan <- true
+			cond.Broadcast()
+		}
+	}
 }
