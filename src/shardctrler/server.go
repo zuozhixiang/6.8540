@@ -18,11 +18,13 @@ type ShardCtrler struct {
 
 	// Your data here.
 	executed         map[int64]bool
-	verisionData     map[int64]Config
+	versionData      map[int64]Config
 	configs          []Config // indexed by config num
 	lastAppliedIndex int
+	maxraftstate     int
 
-	cond *sync.Cond
+	persiter *raft.Persister
+	cond     *sync.Cond
 }
 type OpType int
 
@@ -35,6 +37,7 @@ const (
 
 type Op struct {
 	// Your data here.
+	ID   int64
 	Type OpType
 	Args interface{} // different type, different args
 }
@@ -75,6 +78,7 @@ func (sc *ShardCtrler) Join(req *JoinArgs, resp *JoinReply) {
 	}
 	debugf(m, sc.me, "req: %v", toJson(req))
 	op := Op{
+		ID:   req.ID,
 		Type: JoinOp,
 		Args: req,
 	}
@@ -129,6 +133,7 @@ func (sc *ShardCtrler) Leave(req *LeaveArgs, resp *LeaveReply) {
 	}
 	debugf(m, sc.me, "req: %v", toJson(req))
 	op := Op{
+		ID:   req.ID,
 		Type: LeaveOp,
 		Args: req,
 	}
@@ -184,6 +189,7 @@ func (sc *ShardCtrler) Move(req *MoveArgs, resp *MoveReply) {
 	debugf(m, sc.me, "req: %v", toJson(req))
 
 	op := Op{
+		ID:   req.ID,
 		Type: MoveOp,
 		Args: req,
 	}
@@ -239,6 +245,7 @@ func (sc *ShardCtrler) Query(req *QueryArgs, resp *QueryReply) {
 	}
 	debugf(m, sc.me, "req: %v", toJson(req))
 	op := Op{
+		ID:   req.ID,
 		Type: QueryOp,
 		Args: req,
 	}
@@ -311,6 +318,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 
 	labgob.Register(Op{})
 	sc.applyCh = make(chan raft.ApplyMsg)
+	sc.persiter = persister
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
 
 	// Your code here.
