@@ -67,7 +67,7 @@ func (sc *ShardCtrler) Join(req *JoinArgs, resp *JoinReply) {
 	sc.lock()
 	defer sc.unlock()
 	if !sc.isLeader() {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -84,7 +84,7 @@ func (sc *ShardCtrler) Join(req *JoinArgs, resp *JoinReply) {
 	}
 	index, term, isleader := sc.rf.Start(op)
 	if !isleader {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -101,7 +101,7 @@ func (sc *ShardCtrler) Join(req *JoinArgs, resp *JoinReply) {
 		}
 	}
 	if !sc.isLeader() {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -122,7 +122,7 @@ func (sc *ShardCtrler) Leave(req *LeaveArgs, resp *LeaveReply) {
 	sc.lock()
 	defer sc.unlock()
 	if !sc.isLeader() {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -139,7 +139,7 @@ func (sc *ShardCtrler) Leave(req *LeaveArgs, resp *LeaveReply) {
 	}
 	index, term, isleader := sc.rf.Start(op)
 	if !isleader {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -156,7 +156,7 @@ func (sc *ShardCtrler) Leave(req *LeaveArgs, resp *LeaveReply) {
 		}
 	}
 	if !sc.isLeader() {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -177,7 +177,7 @@ func (sc *ShardCtrler) Move(req *MoveArgs, resp *MoveReply) {
 	sc.lock()
 	defer sc.unlock()
 	if !sc.isLeader() {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -195,7 +195,7 @@ func (sc *ShardCtrler) Move(req *MoveArgs, resp *MoveReply) {
 	}
 	index, term, isleader := sc.rf.Start(op)
 	if !isleader {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -212,7 +212,7 @@ func (sc *ShardCtrler) Move(req *MoveArgs, resp *MoveReply) {
 		}
 	}
 	if !sc.isLeader() {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -234,7 +234,7 @@ func (sc *ShardCtrler) Query(req *QueryArgs, resp *QueryReply) {
 	sc.lock()
 	defer sc.unlock()
 	if !sc.isLeader() {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -251,7 +251,7 @@ func (sc *ShardCtrler) Query(req *QueryArgs, resp *QueryReply) {
 	}
 	index, term, isleader := sc.rf.Start(op)
 	if !isleader {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -268,7 +268,7 @@ func (sc *ShardCtrler) Query(req *QueryArgs, resp *QueryReply) {
 		}
 	}
 	if !sc.isLeader() {
-		resp.WrongLeader = true
+		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
@@ -314,7 +314,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sc.configs[0].Groups = map[int][]string{}
 	sc.executed = map[int64]bool{}
 	sc.cond = sync.NewCond(&sc.mu)
-	sc.verisionData = map[int64]Config{}
+	sc.versionData = map[int64]Config{}
 
 	labgob.Register(Op{})
 	sc.applyCh = make(chan raft.ApplyMsg)

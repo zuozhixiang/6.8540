@@ -47,7 +47,7 @@ func (ck *Clerk) Query(num int) Config {
 		var resp QueryReply
 		debugf(SendQuery, ck.clientID, "req: %v", toJson(req))
 		ok = serv.Call("ShardCtrler.Query", &req, &resp)
-		if !ok || ok && resp.WrongLeader {
+		if !ok || ok && resp.Err != OK {
 			ok = false
 			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
 		} else {
@@ -77,7 +77,7 @@ func (ck *Clerk) Join(servers map[int][]string) {
 		srv := ck.servers[ck.leaderID]
 		debugf(SendJoin, ck.clientID, "req: %v", toJson(req))
 		ok = srv.Call("ShardCtrler.Join", &req, &resp)
-		if !ok || ok && resp.WrongLeader {
+		if !ok || ok && resp.Err != OK {
 			ok = false
 			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
 		} else {
@@ -105,7 +105,7 @@ func (ck *Clerk) Leave(gids []int) {
 		srv := ck.servers[ck.leaderID]
 		debugf(SendLeave, ck.clientID, "req: %v", toJson(req))
 		ok = srv.Call("ShardCtrler.Leave", &req, &resp)
-		if !ok || ok && resp.WrongLeader {
+		if !ok || ok && resp.Err != OK {
 			ok = false
 			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
 		} else {
@@ -134,7 +134,7 @@ func (ck *Clerk) Move(shard int, gid int) {
 		srv := ck.servers[ck.leaderID]
 		debugf(SendMove, ck.clientID, "success req: %v", toJson(req))
 		ok = srv.Call("ShardCtrler.Move", &req, &resp)
-		if !ok || ok && resp.WrongLeader {
+		if !ok || ok && resp.Err != OK {
 			ok = false
 			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
 		} else {
