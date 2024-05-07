@@ -45,6 +45,16 @@ const (
 	QueryMethod Method = "Query"
 	LeaveMethod Method = "Leave"
 	MoveMethod  Method = "Move"
+	SendJoin    Method = "SendJoin"
+	SendQuery   Method = "SendQuery"
+	SendLeave   Method = "SendLeave"
+	SendMove    Method = "SendMove"
+	Apply       Method = "Apply"
+	AppSnap     Method = "AppSnap"
+	MakeSnap    Method = "MakeSnap"
+	Start       Method = "Start1"
+	SendNotify  Method = "SendNoti"
+	Notify      Method = "Notify"
 )
 
 func debugf(meth Method, me int, format string, a ...interface{}) {
@@ -66,7 +76,7 @@ func toJson(data interface{}) string {
 }
 
 func startTimeout(cond *sync.Cond, timeoutChan chan bool) {
-	timeout := time.After(700 * time.Millisecond)
+	timeout := time.After(600 * time.Millisecond)
 	select {
 	case <-timeout:
 		{

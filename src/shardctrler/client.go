@@ -10,8 +10,10 @@ import "crypto/rand"
 import "math/big"
 
 type Clerk struct {
-	servers []*labrpc.ClientEnd
-	// Your data here.
+	servers   []*labrpc.ClientEnd
+	serverNum int
+	clientID  int
+	leaderID  int // client need to know who is leader
 }
 
 func nrand() int64 {
@@ -24,78 +26,125 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+	ck.serverNum = len(servers)
+	ck.leaderID = int(nrand()) % ck.serverNum
+	ck.clientID = int(nrand())
 	// Your code here.
 	return ck
 }
 
 func (ck *Clerk) Query(num int) Config {
-	args := &QueryArgs{}
-	// Your code here.
-	args.Num = num
+	ok := false
+	req := QueryArgs{
+		ID:  nrand(),
+		Num: num,
+	}
+	cnt := 0
+	var res Config
 	for {
 		// try each known server.
-		for _, srv := range ck.servers {
-			var reply QueryReply
-			ok := srv.Call("ShardCtrler.Query", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return reply.Config
-			}
+		serv := ck.servers[ck.leaderID]
+		var resp QueryReply
+		debugf(SendQuery, ck.clientID, "req: %v", toJson(req))
+		ok = serv.Call("ShardCtrler.Query", &req, &resp)
+		if !ok || ok && resp.WrongLeader {
+			ok = false
+			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
+		} else {
+			res = resp.Config
+			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		cnt++
+		if cnt == ck.serverNum {
+			cnt = 0
+			time.Sleep(100 * time.Microsecond)
+		}
 	}
+	debugf(SendQuery, ck.clientID, "success req: %v, resp: %v", toJson(req), toJson(res))
+	return res
 }
 
 func (ck *Clerk) Join(servers map[int][]string) {
-	args := &JoinArgs{}
-	// Your code here.
-	args.Servers = servers
-
+	req := JoinArgs{
+		ID:      nrand(),
+		Servers: servers,
+	}
+	ok := false
+	cnt := 0
 	for {
 		// try each known server.
-		for _, srv := range ck.servers {
-			var reply JoinReply
-			ok := srv.Call("ShardCtrler.Join", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return
-			}
+		var resp JoinReply
+		srv := ck.servers[ck.leaderID]
+		debugf(SendJoin, ck.clientID, "req: %v", toJson(req))
+		ok = srv.Call("ShardCtrler.Join", &req, &resp)
+		if !ok || ok && resp.WrongLeader {
+			ok = false
+			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
+		} else {
+			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		cnt++
+		if cnt == ck.serverNum {
+			cnt = 0
+			time.Sleep(100 * time.Microsecond)
+		}
 	}
+	debugf(SendJoin, ck.clientID, "success req: %v", toJson(req))
 }
 
 func (ck *Clerk) Leave(gids []int) {
-	args := &LeaveArgs{}
-	// Your code here.
-	args.GIDs = gids
-
+	req := LeaveArgs{
+		ID:   nrand(),
+		GIDs: gids,
+	}
+	ok := false
+	cnt := 0
 	for {
 		// try each known server.
-		for _, srv := range ck.servers {
-			var reply LeaveReply
-			ok := srv.Call("ShardCtrler.Leave", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return
-			}
+		var resp JoinReply
+		srv := ck.servers[ck.leaderID]
+		debugf(SendLeave, ck.clientID, "req: %v", toJson(req))
+		ok = srv.Call("ShardCtrler.Leave", &req, &resp)
+		if !ok || ok && resp.WrongLeader {
+			ok = false
+			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
+		} else {
+			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		cnt++
+		if cnt == ck.serverNum {
+			cnt = 0
+			time.Sleep(100 * time.Microsecond)
+		}
 	}
+	debugf(SendLeave, ck.clientID, "success req: %v", toJson(req))
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
-	args := &MoveArgs{}
-	// Your code here.
-	args.Shard = shard
-	args.GID = gid
-
+	req := MoveArgs{
+		ID:    nrand(),
+		Shard: shard,
+		GID:   gid,
+	}
+	ok := false
+	cnt := 0
 	for {
 		// try each known server.
-		for _, srv := range ck.servers {
-			var reply MoveReply
-			ok := srv.Call("ShardCtrler.Move", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return
-			}
+		var resp JoinReply
+		srv := ck.servers[ck.leaderID]
+		debugf(SendMove, ck.clientID, "success req: %v", toJson(req))
+		ok = srv.Call("ShardCtrler.Move", &req, &resp)
+		if !ok || ok && resp.WrongLeader {
+			ok = false
+			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
+		} else {
+			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		cnt++
+		if cnt == ck.serverNum {
+			cnt = 0
+			time.Sleep(100 * time.Microsecond)
+		}
 	}
+	debugf(SendMove, ck.clientID, "success req: %v", toJson(req))
 }
