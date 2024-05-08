@@ -4,6 +4,7 @@ import (
 	"6.5840/labrpc"
 	"fmt"
 	"sync/atomic"
+	"time"
 )
 
 type Clerk struct {
@@ -45,6 +46,7 @@ func (ck *Clerk) Get(key string) string {
 		Key: key,
 	}
 	resp := GetReply{}
+	cnt := 0
 	for {
 		resp = GetReply{}
 		debugf(SendGet, int(ck.ClientID), "req: %v", toJson(req))
@@ -57,6 +59,11 @@ func (ck *Clerk) Get(key string) string {
 			ck.LeaderID = (ck.LeaderID + 1) % len(ck.servers)
 		} else {
 			break
+		}
+		cnt++
+		if cnt == len(ck.servers) {
+			cnt = 0
+			time.Sleep(100 * time.Microsecond)
 		}
 	}
 	if resp.Value == "" {
@@ -88,6 +95,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		m = SendPut
 	}
 	resp := &PutAppendReply{}
+	cnt := 0
 	for {
 		resp = &PutAppendReply{}
 		debugf(m, int(ck.ClientID), "req: %v", toJson(req))
@@ -100,6 +108,11 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			ck.LeaderID = (ck.LeaderID + 1) % len(ck.servers)
 		} else {
 			break
+		}
+		cnt++
+		if cnt == len(ck.servers) {
+			cnt = 0
+			time.Sleep(100 * time.Microsecond)
 		}
 	}
 	debugf(m, int(ck.ClientID), "success, req: %v, resp: %v", toJson(req), toJson(resp))
@@ -121,6 +134,8 @@ func (ck *Clerk) Notify(ID string) {
 		ID: ID,
 	}
 	resp := &NotifyFinishedResponse{}
+
+	cnt := 0
 	for {
 		resp = &NotifyFinishedResponse{}
 		debugf(m, int(ck.ClientID), "req: %v", toJson(req))
@@ -133,6 +148,12 @@ func (ck *Clerk) Notify(ID string) {
 			ck.LeaderID = (ck.LeaderID + 1) % len(ck.servers)
 		} else {
 			break
+		}
+
+		cnt++
+		if cnt == len(ck.servers) {
+			cnt = 0
+			time.Sleep(100 * time.Microsecond)
 		}
 	}
 	debugf(m, int(ck.ClientID), "success, req: %v, resp: %v", toJson(req), toJson(resp))

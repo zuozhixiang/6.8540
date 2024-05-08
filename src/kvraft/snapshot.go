@@ -13,9 +13,9 @@ func (kv *KVServer) dectionMaxSize() {
 	maxsize := kv.maxraftstate
 	for !kv.killed() {
 		time.Sleep(20 * time.Millisecond)
-		kv.lock()
 		size := kv.persiter.RaftStateSize()
-		if size >= kv.maxraftstate {
+		kv.lock()
+		if size >= maxsize {
 			dumps := kv.dumpData()
 			kv.rf.Snapshot(kv.lastAppliedIndex, dumps)
 			debugf(MakeSnap, kv.me, "%v > %v, lastApplied: %v, newsize: %v", size, maxsize, kv.lastAppliedIndex, kv.persiter.RaftStateSize())
