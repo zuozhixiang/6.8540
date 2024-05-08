@@ -1,17 +1,28 @@
 package shardkv
 
-
-import "6.5840/labrpc"
+import (
+	"6.5840/labrpc"
+	"6.5840/shardctrler"
+	"sync/atomic"
+)
 import "6.5840/raft"
 import "sync"
 import "6.5840/labgob"
 
+type OpType int
 
+const (
+	GetType OpType = iota
+	AppendType
+	PutType
+	DeleteType
+)
 
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	ID    int64
+	Type  OpType
+	Key   string
+	Value string
 }
 
 type ShardKV struct {
@@ -25,15 +36,181 @@ type ShardKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	dead             int32
+	data             map[string]string
+	executed         map[int64]bool
+	versionData      map[int64]string
+	lastAppliedIndex int
+	cond             *sync.Cond
+	persiter         *raft.Persister
+	mck              *shardctrler.Clerk
+	ShardConfig      shardctrler.Config
+	shards           map[int]bool
 }
 
-
-func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+func (kv *ShardKV) lock() {
+	kv.mu.Lock()
 }
 
-func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
+func (kv *ShardKV) unlock() {
+	kv.mu.Unlock()
+}
+
+func (kv *ShardKV) isLeader() bool {
+	_, ret := kv.rf.GetState()
+	return ret
+}
+
+func (kv *ShardKV) checkExecuted(id int64) bool {
+	if _, ok := kv.executed[id]; ok {
+		return true
+	}
+	return false
+}
+
+func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
+	if kv.killed() {
+		return
+	}
+
+	m := GetMethod
+	kv.lock()
+	defer kv.unlock()
+	shard := key2shard(req.Key)
+	if _, ok := kv.shards[shard]; !ok {
+		resp.Err = ErrWrongGroup
+		debugf(m, kv.me, "id: %v, Wrong Group", req.ID)
+		return
+	}
+	if !kv.isLeader() {
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		resp.Err = ErrWrongLeader
+		return
+	}
+	resp.Err = OK
+	if kv.checkExecuted(req.ID) {
+		if _, ok := kv.versionData[req.ID]; !ok {
+			panic(req.ID)
+		}
+		resp.Value = kv.versionData[req.ID]
+		debugf(m, kv.me, "Executed, id: %v", req.ID)
+		return
+	}
+
+	op := Op{
+		ID:   req.ID,
+		Key:  req.Key,
+		Type: GetType,
+	}
+
+	index, term, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		resp.Err = ErrWrongLeader
+		return
+	}
+	debugf(m, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
+
+	timeoutChan := make(chan bool, 1)
+	go startTimeout(kv.cond, timeoutChan)
+	timeout := false
+	for !(index <= kv.lastAppliedIndex) && !timeout {
+		select {
+		case <-timeoutChan:
+			timeout = true
+		default:
+			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
+		}
+	}
+	if !kv.isLeader() {
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		resp.Err = ErrWrongLeader
+		return
+	}
+	if timeout {
+		resp.Err = ErrTimeout
+		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
+		return
+	}
+	if _, ok := kv.versionData[op.ID]; !ok {
+		panic("empty")
+	}
+	res := kv.versionData[op.ID]
+	if res == "" {
+		debugf(m, kv.me, "warning, req:%v", toJson(req))
+	}
+	debugf(m, kv.me, "success, req: %v, value: %v", toJson(req), res)
+	resp.Value = res
+}
+
+func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 	// Your code here.
+	if kv.killed() {
+		return
+	}
+	m := PutMethod
+	if req.Op == "Append" {
+		m = AppendMethod
+	}
+
+	kv.lock()
+	defer kv.unlock()
+	shard := key2shard(req.Key)
+	if _, ok := kv.shards[shard]; !ok {
+		resp.Err = ErrWrongGroup
+		debugf(m, kv.me, "id: %v, Wrong Group", req.ID)
+		return
+	}
+	if !kv.isLeader() {
+		debugf(m, kv.me, "id: %v, not leader", req.ID)
+		resp.Err = ErrWrongLeader
+		return
+	}
+
+	resp.Err = OK
+	if kv.checkExecuted(req.ID) {
+		debugf(m, kv.me, "Executed, id: %v", req.ID)
+		return
+	}
+	op := Op{
+		ID:    req.ID,
+		Type:  PutType,
+		Key:   req.Key,
+		Value: req.Value,
+	}
+	if m == AppendMethod {
+		op.Type = AppendType
+	}
+	debugf(m, kv.me, "start, id: %v", req.ID)
+	index, term, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		resp.Err = ErrWrongLeader
+		return
+	}
+	debugf(m, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
+	timeoutChan := make(chan bool, 1)
+	go startTimeout(kv.cond, timeoutChan)
+	timeout := false
+	for !(index <= kv.lastAppliedIndex) && !timeout {
+		select {
+		case <-timeoutChan:
+			timeout = true // timeout notify, raft can not do a agreement
+		default:
+			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
+		}
+	}
+	if !kv.isLeader() {
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		resp.Err = ErrWrongLeader
+		return
+	}
+	if timeout {
+		resp.Err = ErrTimeout
+		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
+		return
+	}
+	debugf(m, kv.me, "success, req:%v", toJson(req))
 }
 
 // the tester calls Kill() when a ShardKV instance won't
@@ -42,9 +219,13 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 // turn off debug output from this instance.
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
-	// Your code here, if desired.
+	atomic.StoreInt32(&kv.dead, 1)
+	debugf(KILL, kv.me, "")
 }
-
+func (kv *ShardKV) killed() bool {
+	ret := atomic.LoadInt32(&kv.dead)
+	return ret == 1
+}
 
 // servers[] contains the ports of the servers in this group.
 //
@@ -87,11 +268,19 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// Your initialization code here.
 
 	// Use something like this to talk to the shardctrler:
-	// kv.mck = shardctrler.MakeClerk(kv.ctrlers)
-
-	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
+	kv.dead = 0
+	kv.data = map[string]string{}
+	kv.executed = map[int64]bool{}
+	kv.versionData = map[int64]string{}
+	kv.lastAppliedIndex = 0
+	kv.cond = sync.NewCond(&kv.mu)
+	kv.applyCh = make(chan raft.ApplyMsg, 100)
+	kv.persiter = persister
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-
+	go kv.applyMsgForStateMachine()
+	go kv.dectionMaxSize()
+	go kv.UpdateConfig()
 	return kv
 }

@@ -9,8 +9,6 @@ package shardkv
 //
 
 import "6.5840/labrpc"
-import "crypto/rand"
-import "math/big"
 import "6.5840/shardctrler"
 import "time"
 
@@ -24,13 +22,6 @@ func key2shard(key string) int {
 	}
 	shard %= shardctrler.NShards
 	return shard
-}
-
-func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
-	bigx, _ := rand.Int(rand.Reader, max)
-	x := bigx.Int64()
-	return x
 }
 
 type Clerk struct {
@@ -62,6 +53,7 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 func (ck *Clerk) Get(key string) string {
 	args := GetArgs{}
 	args.Key = key
+	args.ID = nrand()
 
 	for {
 		shard := key2shard(key)
@@ -93,10 +85,10 @@ func (ck *Clerk) Get(key string) string {
 // You will have to modify this function.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args := PutAppendArgs{}
+	args.ID = nrand()
 	args.Key = key
 	args.Value = value
 	args.Op = op
-
 
 	for {
 		shard := key2shard(key)
