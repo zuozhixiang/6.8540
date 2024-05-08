@@ -2,7 +2,6 @@ package shardctrler
 
 import (
 	"6.5840/raft"
-	"fmt"
 	"sync/atomic"
 )
 import "6.5840/labrpc"
@@ -80,15 +79,14 @@ func (sc *ShardCtrler) Join(req *JoinArgs, resp *JoinReply) {
 	op := Op{
 		ID:   req.ID,
 		Type: JoinOp,
-		Args: req,
+		Args: *req,
 	}
-	index, term, isleader := sc.rf.Start(op)
+	index, _, isleader := sc.rf.Start(op)
 	if !isleader {
 		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
-	fmt.Println(term)
 	timeoutChan := make(chan bool, 1)
 	go startTimeout(sc.cond, timeoutChan)
 	timeout := false
@@ -135,15 +133,15 @@ func (sc *ShardCtrler) Leave(req *LeaveArgs, resp *LeaveReply) {
 	op := Op{
 		ID:   req.ID,
 		Type: LeaveOp,
-		Args: req,
+		Args: *req,
 	}
-	index, term, isleader := sc.rf.Start(op)
+	index, _, isleader := sc.rf.Start(op)
 	if !isleader {
 		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
-	fmt.Println(term)
+
 	timeoutChan := make(chan bool, 1)
 	go startTimeout(sc.cond, timeoutChan)
 	timeout := false
@@ -191,15 +189,14 @@ func (sc *ShardCtrler) Move(req *MoveArgs, resp *MoveReply) {
 	op := Op{
 		ID:   req.ID,
 		Type: MoveOp,
-		Args: req,
+		Args: *req,
 	}
-	index, term, isleader := sc.rf.Start(op)
+	index, _, isleader := sc.rf.Start(op)
 	if !isleader {
 		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
-	fmt.Println(term)
 	timeoutChan := make(chan bool, 1)
 	go startTimeout(sc.cond, timeoutChan)
 	timeout := false
@@ -241,21 +238,21 @@ func (sc *ShardCtrler) Query(req *QueryArgs, resp *QueryReply) {
 	resp.Err = OK
 	if sc.checkExecuted(req.ID) {
 		debugf(m, sc.me, "id: %v, executed", req.ID)
+		resp.Config = sc.versionData[req.ID]
 		return
 	}
 	debugf(m, sc.me, "req: %v", toJson(req))
 	op := Op{
 		ID:   req.ID,
 		Type: QueryOp,
-		Args: req,
+		Args: *req,
 	}
-	index, term, isleader := sc.rf.Start(op)
+	index, _, isleader := sc.rf.Start(op)
 	if !isleader {
 		resp.Err = ErrWrongLeader
 		debugf(m, sc.me, "not leader")
 		return
 	}
-	fmt.Println(term)
 	timeoutChan := make(chan bool, 1)
 	go startTimeout(sc.cond, timeoutChan)
 	timeout := false
@@ -277,7 +274,8 @@ func (sc *ShardCtrler) Query(req *QueryArgs, resp *QueryReply) {
 		debugf(m, sc.me, "timeout, id: %v", req.ID)
 		return
 	}
-	debugf(m, sc.me, "success, req: %v", toJson(req))
+	resp.Config = sc.versionData[req.ID]
+	debugf(m, sc.me, "success, req: %v, resp: %v", toJson(req), toJson(resp))
 }
 
 // the tester calls Kill() when a ShardCtrler instance won't
@@ -317,11 +315,14 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sc.versionData = map[int64]Config{}
 
 	labgob.Register(Op{})
-	sc.applyCh = make(chan raft.ApplyMsg)
+	labgob.Register(QueryArgs{})
+	labgob.Register(JoinArgs{})
+	labgob.Register(LeaveArgs{})
+	labgob.Register(MoveArgs{})
+	sc.applyCh = make(chan raft.ApplyMsg, 100)
 	sc.persiter = persister
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
-
-	// Your code here.
+	go sc.applyMsg()
 
 	return sc
 }

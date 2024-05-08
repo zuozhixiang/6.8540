@@ -119,7 +119,7 @@ func CheckValid(shards [NShards]int, groups map[int][]string) bool {
 	for _, x := range shards {
 		gidSet[x] = true
 	}
-	if len(gidSet) != totSize {
+	if len(gidSet) > totSize {
 		return false
 	}
 	gids := []int{}
@@ -128,11 +128,7 @@ func CheckValid(shards [NShards]int, groups map[int][]string) bool {
 	}
 	sort.Ints(gids)
 	gidss := getSortedGID(groups)
-	for i := 0; i < len(gids); i++ {
-		if gidss[i] != gids[i] {
-			return false
-		}
-	}
+
 	// check balance
 	sort.Slice(gidss, func(i, j int) bool {
 		return len(allocatedMap[gidss[i]]) > len(allocatedMap[gidss[j]])
@@ -204,6 +200,9 @@ func ConstructAfterJoin(oldConfig *Config, newGroups map[int][]string) *Config {
 			remainder--
 			num++
 		}
+		if num == 0 {
+			continue
+		}
 		if num > len(needReAllocateShard) {
 			panic(num)
 		}
@@ -252,6 +251,9 @@ func constructAfterLeave(oldConfig *Config, gids []int) *Config {
 		needReAllocateShard = append(needReAllocateShard, oldAllocated[gid]...)
 	}
 	for _, gid := range remainedGids {
+		if len(needReAllocateShard) == 0 {
+			break
+		}
 		num := avg
 		if remainder > 0 {
 			num++
@@ -262,12 +264,17 @@ func constructAfterLeave(oldConfig *Config, gids []int) *Config {
 			msg := fmt.Sprintf("%v < %v", num, len(oldAllocated[gid]))
 			panic(msg)
 		} else if cnt > 0 {
+			if cnt > len(needReAllocateShard) {
+				errMsg := fmt.Sprintf("config: %v \n gids: %v cnt: %v, needRe: %v", toJson(oldConfig), toJson(gids), cnt, toJson(needReAllocateShard))
+				panic(errMsg)
+			}
 			newShards := needReAllocateShard[:cnt]
 			for _, shard := range newShards {
 				res.Shards[shard] = gid
 			}
 			needReAllocateShard = needReAllocateShard[cnt:]
 		}
+
 	}
 	return &res
 }

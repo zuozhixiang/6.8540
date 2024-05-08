@@ -50,6 +50,7 @@ func (ck *Clerk) Query(num int) Config {
 		if !ok || ok && resp.Err != OK {
 			ok = false
 			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
+			debugf(SendQuery, ck.clientID, "fail req: %v, resp: %v", toJson(req), toJson(resp))
 		} else {
 			res = resp.Config
 			break
@@ -80,6 +81,7 @@ func (ck *Clerk) Join(servers map[int][]string) {
 		if !ok || ok && resp.Err != OK {
 			ok = false
 			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
+			debugf(SendJoin, ck.clientID, "fail req: %v, resp: %v", toJson(req), toJson(resp))
 		} else {
 			break
 		}
@@ -108,6 +110,7 @@ func (ck *Clerk) Leave(gids []int) {
 		if !ok || ok && resp.Err != OK {
 			ok = false
 			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
+			debugf(SendLeave, ck.clientID, "fail req: %v, resp: %v", toJson(req), toJson(resp))
 		} else {
 			break
 		}
@@ -137,6 +140,7 @@ func (ck *Clerk) Move(shard int, gid int) {
 		if !ok || ok && resp.Err != OK {
 			ok = false
 			ck.leaderID = (ck.leaderID + 1) % ck.serverNum
+			debugf(SendMove, ck.clientID, "fail req: %v, resp: %v", toJson(req), toJson(resp))
 		} else {
 			break
 		}

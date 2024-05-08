@@ -62,7 +62,7 @@ func debugf(meth Method, me int, format string, a ...interface{}) {
 		_, file, line, _ := runtime.Caller(1)
 		pos := fmt.Sprintf("%v:%v", file[Len:], line) // print log code line
 		info := fmt.Sprintf("[S%v]", me)
-		fmt := "%-16v %-8v %-22v " + format
+		fmt := "%-16v %-10v %-22v " + format
 
 		x := []interface{}{pos, meth, info}
 		x = append(x, a...)
