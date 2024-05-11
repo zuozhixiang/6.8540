@@ -15,7 +15,7 @@ func (sc *ShardCtrler) executeOp(op Op) {
 		}
 		res := sc.configs[args.Num]
 		sc.versionData[op.ID] = res
-		debugf(Apply, sc.me, "query req: %v, version[%v] config: %v, allocate: %v", toJson(args), args.Num, toJson(res), toJson(getGIDShards(res.Shards)))
+		debugf(Apply, sc.me, "query req: %v, version[%v] config: %v, allocate: %v", toJson(args), args.Num, toJson(res), toJson(GetGIDShards(res.Shards)))
 	case JoinOp:
 		args := op.Args.(JoinArgs)
 		lastConfig := sc.configs[len(sc.configs)-1]
@@ -24,11 +24,11 @@ func (sc *ShardCtrler) executeOp(op Op) {
 		newConfig := ConstructAfterJoin(&lastConfig, newGroups)
 		sc.configs = append(sc.configs, *newConfig)
 		if !CheckValid(newConfig.Shards, newConfig.Groups) {
-			msg := fmt.Sprintf("[S%v] %v\n%v", sc.me, toJson(newConfig), toJson(getGIDShards(newConfig.Shards)))
+			msg := fmt.Sprintf("[S%v] %v\n%v", sc.me, toJson(newConfig), toJson(GetGIDShards(newConfig.Shards)))
 			panic(msg)
 		}
-		beforeState := fmt.Sprintf("[V%v] config: %v, allocate: %v", lastConfig.Num, toJson(lastConfig), toJson(getGIDShards(lastConfig.Shards)))
-		debugf(Apply, sc.me, "join, req: %v, before: [ %v ], config: %v, allocate: %v", toJson(args), beforeState, toJson(newConfig), toJson(getGIDShards(newConfig.Shards)))
+		beforeState := fmt.Sprintf("[V%v] config: %v, allocate: %v", lastConfig.Num, toJson(lastConfig), toJson(GetGIDShards(lastConfig.Shards)))
+		debugf(Apply, sc.me, "join, req: %v, before: [ %v ], config: %v, allocate: %v", toJson(args), beforeState, toJson(newConfig), toJson(GetGIDShards(newConfig.Shards)))
 	case LeaveOp:
 		args := op.Args.(LeaveArgs)
 		gids := args.GIDs
@@ -37,11 +37,11 @@ func (sc *ShardCtrler) executeOp(op Op) {
 		newConfig := constructAfterLeave(&lastConfig, gids)
 		sc.configs = append(sc.configs, *newConfig)
 		if !CheckValid(newConfig.Shards, newConfig.Groups) {
-			msg := fmt.Sprintf("%v\n%v", toJson(newConfig), toJson(getGIDShards(newConfig.Shards)))
+			msg := fmt.Sprintf("%v\n%v", toJson(newConfig), toJson(GetGIDShards(newConfig.Shards)))
 			panic(msg)
 		}
-		beforeState := fmt.Sprintf("[V%v] config: %v, allocate: %v", lastConfig.Num, toJson(lastConfig), toJson(getGIDShards(lastConfig.Shards)))
-		debugf(Apply, sc.me, "leave, req: %v, before: [ %v ],  config: %v, allocate: %v", toJson(args), beforeState, toJson(newConfig), toJson(getGIDShards(newConfig.Shards)))
+		beforeState := fmt.Sprintf("[V%v] config: %v, allocate: %v", lastConfig.Num, toJson(lastConfig), toJson(GetGIDShards(lastConfig.Shards)))
+		debugf(Apply, sc.me, "leave, req: %v, before: [ %v ],  config: %v, allocate: %v", toJson(args), beforeState, toJson(newConfig), toJson(GetGIDShards(newConfig.Shards)))
 	case MoveOp:
 		args := op.Args.(MoveArgs)
 		shard := args.Shard
@@ -50,8 +50,8 @@ func (sc *ShardCtrler) executeOp(op Op) {
 		// move the shard to gid
 		newConfig := constructAfterMove(&lastConfig, gid, shard)
 		sc.configs = append(sc.configs, *newConfig)
-		beforeState := fmt.Sprintf("[V%v] config: %v, allocate: %v", lastConfig.Num, toJson(lastConfig), toJson(getGIDShards(lastConfig.Shards)))
-		debugf(Apply, sc.me, "move, req: %v, before: [ %v ], config: %v, allocate: %v", toJson(args), beforeState, toJson(newConfig), toJson(getGIDShards(newConfig.Shards)))
+		beforeState := fmt.Sprintf("[V%v] config: %v, allocate: %v", lastConfig.Num, toJson(lastConfig), toJson(GetGIDShards(lastConfig.Shards)))
+		debugf(Apply, sc.me, "move, req: %v, before: [ %v ], config: %v, allocate: %v", toJson(args), beforeState, toJson(newConfig), toJson(GetGIDShards(newConfig.Shards)))
 	default:
 		panic("illegal Op")
 	}

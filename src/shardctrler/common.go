@@ -88,7 +88,7 @@ func getSortedGID(groups map[int][]string) []int {
 	return res
 }
 
-func getGIDShards(shards [NShards]int) map[int][]int {
+func GetGIDShards(shards [NShards]int) map[int][]int {
 	res := map[int][]int{}
 	for shard, gid := range shards {
 		res[gid] = append(res[gid], shard)
@@ -112,7 +112,7 @@ func CheckValid(shards [NShards]int, groups map[int][]string) bool {
 		return true
 	}
 	// check balance and  shard be repeatly allocated for more than one group
-	allocatedMap := getGIDShards(shards)
+	allocatedMap := GetGIDShards(shards)
 	totSize := len(groups)
 	gidSet := map[int]bool{}
 	// check groups is same as shards
@@ -159,7 +159,7 @@ func ConstructAfterJoin(oldConfig *Config, newGroups map[int][]string) *Config {
 	}
 	newJoinGids := getSortedGID(newGroups)
 	oldGids := getSortedGID(oldConfig.Groups)
-	oldAllocate := getGIDShards(oldConfig.Shards)
+	oldAllocate := GetGIDShards(oldConfig.Shards)
 	sort.Slice(oldGids, func(i, j int) bool {
 		return len(oldAllocate[oldGids[i]]) > len(oldAllocate[oldGids[j]])
 	}) // gid sort by the number of shard
@@ -225,7 +225,7 @@ func constructAfterLeave(oldConfig *Config, gids []int) *Config {
 	for i := 0; i < len(oldConfig.Shards); i++ {
 		res.Shards[i] = oldConfig.Shards[i]
 	}
-	oldAllocated := getGIDShards(oldConfig.Shards)
+	oldAllocated := GetGIDShards(oldConfig.Shards)
 	totGroups := map[int][]string{}
 	res.Groups = totGroups
 	for gid, srvs := range oldConfig.Groups {

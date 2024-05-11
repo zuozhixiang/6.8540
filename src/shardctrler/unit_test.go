@@ -24,8 +24,8 @@ func TestConfigJoin(t *testing.T) {
 		},
 	}
 	newConf := ConstructAfterJoin(&config, req.Servers)
-	fmt.Printf("before: %v\n", toJson(getGIDShards(config.Shards)))
-	fmt.Printf("%+v\n%v\n", toJson(newConf), toJson(getGIDShards(newConf.Shards)))
+	fmt.Printf("before: %v\n", toJson(GetGIDShards(config.Shards)))
+	fmt.Printf("%+v\n%v\n", toJson(newConf), toJson(GetGIDShards(newConf.Shards)))
 	if !CheckValid(newConf.Shards, newConf.Groups) {
 		panic(t)
 	}
@@ -53,8 +53,8 @@ func TestConfigJoin2(t *testing.T) {
 		},
 	}
 	newConf := ConstructAfterJoin(&config, req.Servers)
-	fmt.Printf("before: %v\n", toJson(getGIDShards(config.Shards)))
-	fmt.Printf("%+v\n%v\n", toJson(newConf), toJson(getGIDShards(newConf.Shards)))
+	fmt.Printf("before: %v\n", toJson(GetGIDShards(config.Shards)))
+	fmt.Printf("%+v\n%v\n", toJson(newConf), toJson(GetGIDShards(newConf.Shards)))
 	if !CheckValid(newConf.Shards, newConf.Groups) {
 		panic(t)
 	}
@@ -75,8 +75,8 @@ func TestJoinEmpty(t *testing.T) {
 		},
 	}
 	newConf := ConstructAfterJoin(&config, req.Servers)
-	fmt.Printf("before: %v\n", toJson(getGIDShards(config.Shards)))
-	fmt.Printf("%+v\n%v\n", toJson(newConf), toJson(getGIDShards(newConf.Shards)))
+	fmt.Printf("before: %v\n", toJson(GetGIDShards(config.Shards)))
+	fmt.Printf("%+v\n%v\n", toJson(newConf), toJson(GetGIDShards(newConf.Shards)))
 	if !CheckValid(newConf.Shards, newConf.Groups) {
 		panic(t)
 	}
@@ -109,29 +109,29 @@ func TestConfigLeave(t *testing.T) {
 		GIDs: []int{3},
 	}
 	newConf := constructAfterLeave(&config, req.GIDs)
-	fmt.Printf("before: %v\n\n", toJson(getGIDShards(config.Shards)))
-	fmt.Printf("%v\n, %v\n\n", toJson(newConf), toJson(getGIDShards(newConf.Shards)))
+	fmt.Printf("before: %v\n\n", toJson(GetGIDShards(config.Shards)))
+	fmt.Printf("%v\n, %v\n\n", toJson(newConf), toJson(GetGIDShards(newConf.Shards)))
 	if !CheckValid(newConf.Shards, newConf.Groups) {
 		panic(t)
 	}
 
 	req.GIDs = []int{2, 3}
 	newConf = constructAfterLeave(&config, req.GIDs)
-	fmt.Printf("%v\n, %v\n\n", toJson(newConf), toJson(getGIDShards(newConf.Shards)))
+	fmt.Printf("%v\n, %v\n\n", toJson(newConf), toJson(GetGIDShards(newConf.Shards)))
 	if !CheckValid(newConf.Shards, newConf.Groups) {
 		panic(t)
 	}
 
 	req.GIDs = []int{1, 2, 3} // all leave
 	newConf = constructAfterLeave(&config, req.GIDs)
-	fmt.Printf("%v\n, %v\n\n", toJson(newConf), toJson(getGIDShards(newConf.Shards)))
+	fmt.Printf("%v\n, %v\n\n", toJson(newConf), toJson(GetGIDShards(newConf.Shards)))
 	if !CheckValid(newConf.Shards, newConf.Groups) {
 		panic(t)
 	}
 
 	req.GIDs = []int{1}
 	newConf = constructAfterLeave(&config, req.GIDs)
-	fmt.Printf("%v\n, %v\n\n", toJson(newConf), toJson(getGIDShards(newConf.Shards)))
+	fmt.Printf("%v\n, %v\n\n", toJson(newConf), toJson(GetGIDShards(newConf.Shards)))
 	if !CheckValid(newConf.Shards, newConf.Groups) {
 		panic(t)
 	}
