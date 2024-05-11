@@ -38,7 +38,7 @@ func (kv *ShardKV) dumpData() []byte {
 	if err = d.Encode(kv.versionData); err != nil {
 		panic(err)
 	}
-	if err = d.Encode(kv.executedList); err != nil {
+	if err = d.Encode(kv.moveExecuted); err != nil {
 		panic(err)
 	}
 
@@ -52,9 +52,9 @@ func (kv *ShardKV) applySnapshot(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var newState [shardctrler.NShards]map[string]string
-	var executed map[int64]bool
+	var executed [shardctrler.NShards]map[int64]bool
 	var versionData [shardctrler.NShards]map[int64]string
-	var executedList [shardctrler.NShards][]int64
+	var moveExecuted map[int64]bool
 	if err := d.Decode(&newState); err != nil {
 		panic(err)
 	} else {
@@ -70,7 +70,9 @@ func (kv *ShardKV) applySnapshot(data []byte) {
 	} else {
 		kv.versionData = versionData
 	}
-	if err := d.Decode(&executedList); err != nil {
-		kv.executedList = executedList
+	if err := d.Decode(&moveExecuted); err != nil {
+		panic(err)
+	} else {
+		kv.moveExecuted = moveExecuted
 	}
 }

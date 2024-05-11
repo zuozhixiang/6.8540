@@ -16,13 +16,34 @@ const (
 	AppendType
 	PutType
 	DeleteType
+	SyncConfigType
+	GetShardType
 )
 
+type ShardState int
+
+const (
+	Normal ShardState = iota
+	NoReady
+	NoSelf
+)
+
+type ShardData struct {
+	Shard       int
+	Data        map[string]string
+	VersionData map[int64]string
+	Executed    map[int64]bool
+}
+
 type Op struct {
-	ID    int64
-	Type  OpType
-	Key   string
-	Value string
+	ID               int64
+	Type             OpType
+	Key              string
+	Value            string
+	NeedRemoveShards []int // need remove shards
+	NeedAddShards    []int
+	Config           shardctrler.Config
+	ShardData        *ShardData
 }
 
 type ShardKV struct {
@@ -36,11 +57,14 @@ type ShardKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	dead             int32
-	data             [shardctrler.NShards]map[string]string
-	executed         map[int64]bool
-	executedList     [shardctrler.NShards][]int64
-	versionData      [shardctrler.NShards]map[int64]string
+	dead        int32
+	data        [shardctrler.NShards]map[string]string
+	executed    [shardctrler.NShards]map[int64]bool
+	versionData [shardctrler.NShards]map[int64]string
+
+	// move shard dupucated check
+	moveExecuted     map[int64]bool
+	NoReadyShardSet  map[int]bool
 	lastAppliedIndex int
 	cond             *sync.Cond
 	persiter         *raft.Persister
@@ -62,8 +86,8 @@ func (kv *ShardKV) isLeader() bool {
 	return ret
 }
 
-func (kv *ShardKV) checkExecuted(id int64) bool {
-	if _, ok := kv.executed[id]; ok {
+func (kv *ShardKV) checkExecuted(id int64, shard int) bool {
+	if _, ok := kv.executed[shard][id]; ok {
 		return true
 	}
 	return false
@@ -90,7 +114,7 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 		return
 	}
 	resp.Err = OK
-	if kv.checkExecuted(req.ID) {
+	if kv.checkExecuted(req.ID, shard) {
 		if _, ok := kv.versionData[shard][req.ID]; !ok {
 			panic(req.ID)
 		}
@@ -171,7 +195,7 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 	}
 
 	resp.Err = OK
-	if kv.checkExecuted(req.ID) {
+	if kv.checkExecuted(req.ID, shard) {
 		debugf(m, kv.me, kv.gid, "Executed, id: %v", req.ID)
 		return
 	}
@@ -275,14 +299,15 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.dead = 0
 	for i := 0; i < shardctrler.NShards; i++ {
 		kv.data[i] = map[string]string{}
-		kv.executedList[i] = []int64{}
+		kv.executed[i] = map[int64]bool{}
 		kv.versionData[i] = map[int64]string{}
 	}
-	kv.executed = map[int64]bool{}
+	kv.moveExecuted = map[int64]bool{}
 	kv.lastAppliedIndex = 0
 	kv.cond = sync.NewCond(&kv.mu)
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
 	kv.persiter = persister
+	kv.NoReadyShardSet = map[int]bool{}
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.applyMsgForStateMachine()

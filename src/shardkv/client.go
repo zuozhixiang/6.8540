@@ -70,6 +70,10 @@ func (ck *Clerk) Get(key string) string {
 				if ok && (reply.Err == ErrWrongGroup) {
 					break
 				}
+				if ok && reply.Err == ErrShardNoReady {
+					time.Sleep(100 * time.Millisecond)
+					si-- // continue to request this srv
+				}
 				// ... not ok, or ErrWrongLeader
 			}
 		}
@@ -103,6 +107,10 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				}
 				if ok && reply.Err == ErrWrongGroup {
 					break
+				}
+				if ok && reply.Err == ErrShardNoReady {
+					time.Sleep(100 * time.Millisecond)
+					si-- // continue to request this srv
 				}
 				// ... not ok, or ErrWrongLeader
 			}

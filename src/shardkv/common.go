@@ -1,5 +1,7 @@
 package shardkv
 
+import "6.5840/shardctrler"
+
 //
 // Sharded key/value server.
 // Lots of replica groups, each running Raft.
@@ -10,11 +12,13 @@ package shardkv
 //
 
 const (
-	OK             = "OK"
-	ErrNoKey       = "ErrNoKey"
-	ErrWrongGroup  = "ErrWrongGroup"
-	ErrWrongLeader = "ErrWrongLeader"
-	ErrTimeout     = "ErrTimeout"
+	OK              = "OK"
+	ErrNoKey        = "ErrNoKey"
+	ErrWrongGroup   = "ErrWrongGroup"
+	ErrWrongLeader  = "ErrWrongLeader"
+	ErrTimeout      = "ErrTimeout"
+	ErrShardNoReady = "ErrShardNoReady"
+	ErrOldVersion   = "ErrOldVersion"
 )
 
 type Err string
@@ -43,4 +47,17 @@ type GetArgs struct {
 type GetReply struct {
 	Err   Err
 	Value string
+}
+
+type MoveShardArgs struct {
+	ID          int64
+	Shard       int
+	ShardData   map[string]string
+	VersionData map[int64]string
+	Executed    map[int64]bool
+	ShardConfig shardctrler.Config
+}
+
+type MoveShardReply struct {
+	Err Err
 }
