@@ -2,6 +2,7 @@ package shardkv
 
 import (
 	"6.5840/labgob"
+	"6.5840/shardctrler"
 	"bytes"
 	"time"
 )
@@ -18,7 +19,7 @@ func (kv *ShardKV) dectionMaxSize() {
 		if size >= maxsize {
 			dumps := kv.dumpData()
 			kv.rf.Snapshot(kv.lastAppliedIndex, dumps)
-			debugf(MakeSnap, kv.me, "%v > %v, lastApplied: %v, newsize: %v", size, maxsize, kv.lastAppliedIndex, kv.persiter.RaftStateSize())
+			debugf(MakeSnap, kv.me, kv.gid, "%v > %v, lastApplied: %v, newsize: %v", size, maxsize, kv.lastAppliedIndex, kv.persiter.RaftStateSize())
 		}
 		kv.unlock()
 	}
@@ -37,6 +38,9 @@ func (kv *ShardKV) dumpData() []byte {
 	if err = d.Encode(kv.versionData); err != nil {
 		panic(err)
 	}
+	if err = d.Encode(kv.executedList); err != nil {
+		panic(err)
+	}
 
 	return w.Bytes()
 }
@@ -47,9 +51,10 @@ func (kv *ShardKV) applySnapshot(data []byte) {
 	}
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
-	var newState map[string]string
+	var newState [shardctrler.NShards]map[string]string
 	var executed map[int64]bool
-	var versionData map[int64]string
+	var versionData [shardctrler.NShards]map[int64]string
+	var executedList [shardctrler.NShards][]int64
 	if err := d.Decode(&newState); err != nil {
 		panic(err)
 	} else {
@@ -64,5 +69,8 @@ func (kv *ShardKV) applySnapshot(data []byte) {
 		panic(err)
 	} else {
 		kv.versionData = versionData
+	}
+	if err := d.Decode(&executedList); err != nil {
+		kv.executedList = executedList
 	}
 }

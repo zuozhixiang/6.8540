@@ -37,9 +37,10 @@ type ShardKV struct {
 
 	// Your definitions here.
 	dead             int32
-	data             map[string]string
+	data             [shardctrler.NShards]map[string]string
 	executed         map[int64]bool
-	versionData      map[int64]string
+	executedList     [shardctrler.NShards][]int64
+	versionData      [shardctrler.NShards]map[int64]string
 	lastAppliedIndex int
 	cond             *sync.Cond
 	persiter         *raft.Persister
@@ -74,26 +75,27 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 	}
 
 	m := GetMethod
+
+	if !kv.isLeader() {
+		debugf(m, kv.me, kv.gid, "id: %v, not leader", req.ID)
+		resp.Err = ErrWrongLeader
+		return
+	}
 	kv.lock()
 	defer kv.unlock()
 	shard := key2shard(req.Key)
 	if _, ok := kv.shards[shard]; !ok {
 		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, "id: %v, Wrong Group", req.ID)
-		return
-	}
-	if !kv.isLeader() {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group", req.ID, shard)
 		return
 	}
 	resp.Err = OK
 	if kv.checkExecuted(req.ID) {
-		if _, ok := kv.versionData[req.ID]; !ok {
+		if _, ok := kv.versionData[shard][req.ID]; !ok {
 			panic(req.ID)
 		}
-		resp.Value = kv.versionData[req.ID]
-		debugf(m, kv.me, "Executed, id: %v", req.ID)
+		resp.Value = kv.versionData[shard][req.ID]
+		debugf(m, kv.me, kv.gid, "Executed, id: %v", req.ID)
 		return
 	}
 
@@ -105,11 +107,11 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 
 	index, term, isLeader := kv.rf.Start(op)
 	if !isLeader {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
 		resp.Err = ErrWrongLeader
 		return
 	}
-	debugf(m, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
+	debugf(m, kv.me, kv.gid, "req: %v, index: %v, term:%v", toJson(req), index, term)
 
 	timeoutChan := make(chan bool, 1)
 	go startTimeout(kv.cond, timeoutChan)
@@ -123,23 +125,23 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 		}
 	}
 	if !kv.isLeader() {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
 		resp.Err = ErrWrongLeader
 		return
 	}
 	if timeout {
 		resp.Err = ErrTimeout
-		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
+		debugf(m, kv.me, kv.gid, "timeout!, req: %v", toJson(req))
 		return
 	}
-	if _, ok := kv.versionData[op.ID]; !ok {
+	if _, ok := kv.versionData[shard][op.ID]; !ok {
 		panic("empty")
 	}
-	res := kv.versionData[op.ID]
+	res := kv.versionData[shard][op.ID]
 	if res == "" {
-		debugf(m, kv.me, "warning, req:%v", toJson(req))
+		debugf(m, kv.me, kv.gid, "warning, req:%v", toJson(req))
 	}
-	debugf(m, kv.me, "success, req: %v, value: %v", toJson(req), res)
+	debugf(m, kv.me, kv.gid, "success, req: %v, value: %v", toJson(req), res)
 	resp.Value = res
 }
 
@@ -152,24 +154,25 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 	if req.Op == "Append" {
 		m = AppendMethod
 	}
-
-	kv.lock()
-	defer kv.unlock()
-	shard := key2shard(req.Key)
-	if _, ok := kv.shards[shard]; !ok {
-		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, "id: %v, Wrong Group", req.ID)
+	if !kv.isLeader() {
+		debugf(m, kv.me, kv.gid, "id: %v, not leader", req.ID)
+		resp.Err = ErrWrongLeader
 		return
 	}
-	if !kv.isLeader() {
-		debugf(m, kv.me, "id: %v, not leader", req.ID)
-		resp.Err = ErrWrongLeader
+	kv.lock()
+	defer kv.unlock()
+
+	shard := key2shard(req.Key)
+
+	if _, ok := kv.shards[shard]; !ok {
+		resp.Err = ErrWrongGroup
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.shards))
 		return
 	}
 
 	resp.Err = OK
 	if kv.checkExecuted(req.ID) {
-		debugf(m, kv.me, "Executed, id: %v", req.ID)
+		debugf(m, kv.me, kv.gid, "Executed, id: %v", req.ID)
 		return
 	}
 	op := Op{
@@ -181,14 +184,14 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 	if m == AppendMethod {
 		op.Type = AppendType
 	}
-	debugf(m, kv.me, "start, id: %v", req.ID)
+	debugf(m, kv.me, kv.gid, "start, id: %v", req.ID)
 	index, term, isLeader := kv.rf.Start(op)
 	if !isLeader {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
 		resp.Err = ErrWrongLeader
 		return
 	}
-	debugf(m, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
+	debugf(m, kv.me, kv.gid, "req: %v, index: %v, term:%v", toJson(req), index, term)
 	timeoutChan := make(chan bool, 1)
 	go startTimeout(kv.cond, timeoutChan)
 	timeout := false
@@ -201,16 +204,16 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 		}
 	}
 	if !kv.isLeader() {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
+		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
 		resp.Err = ErrWrongLeader
 		return
 	}
 	if timeout {
 		resp.Err = ErrTimeout
-		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
+		debugf(m, kv.me, kv.gid, "timeout!, req: %v", toJson(req))
 		return
 	}
-	debugf(m, kv.me, "success, req:%v", toJson(req))
+	debugf(m, kv.me, kv.gid, "success, req:%v", toJson(req))
 }
 
 // the tester calls Kill() when a ShardKV instance won't
@@ -220,7 +223,7 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
 	atomic.StoreInt32(&kv.dead, 1)
-	debugf(KILL, kv.me, "")
+	debugf(KILL, kv.me, kv.gid, "")
 }
 func (kv *ShardKV) killed() bool {
 	ret := atomic.LoadInt32(&kv.dead)
@@ -270,9 +273,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// Use something like this to talk to the shardctrler:
 	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
 	kv.dead = 0
-	kv.data = map[string]string{}
+	for i := 0; i < shardctrler.NShards; i++ {
+		kv.data[i] = map[string]string{}
+		kv.executedList[i] = []int64{}
+		kv.versionData[i] = map[int64]string{}
+	}
 	kv.executed = map[int64]bool{}
-	kv.versionData = map[int64]string{}
 	kv.lastAppliedIndex = 0
 	kv.cond = sync.NewCond(&kv.mu)
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
