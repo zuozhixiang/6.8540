@@ -65,7 +65,6 @@ func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 	if kv.killed() {
 		return
 	}
-	// Your code here.
 	kv.lock()
 	defer kv.unlock()
 
@@ -78,7 +77,7 @@ func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 	resp.Err = OK
 	if kv.checkExecuted(req.ID) {
 		if _, ok := kv.versionData[req.ID]; !ok {
-			panic("1")
+			panic(req.ID)
 		}
 		resp.Value = kv.versionData[req.ID]
 		debugf(m, kv.me, "Executed, id: %v", req.ID)
