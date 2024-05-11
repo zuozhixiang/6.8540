@@ -102,7 +102,7 @@ func (rf *Raft) AppendEntries(req *AppendEntriesRequest, resp *AppendEntriesResp
 		}
 	} else {
 		resp.Success = true
-		rf.debugf(m, "Leader[S%v]-> success, req: %v, state: %v", req.LeaderID, toJson(req), toJson(rf))
+		rf.debugf(m, "Leader[S%v]-> success, req: %v, state: %v", req.LeaderID, toJson(req), toJson(rf.Logs))
 		lastIndex := rf.Logs.GetLastIndex()
 		// notice: raft paper descript:
 		//If an existing entry conflicts with a new one (same index
@@ -155,8 +155,8 @@ func (rf *Raft) SendLogData(server int, req *AppendEntriesRequest, nextIndex int
 		m = SendHeart
 	}
 	if resp.Success {
-		rf.debugf(m, "success, ->[S%v], req: %v, resp: %v, state: %v",
-			server, toJson(req), toJson(resp), toJson(rf))
+		rf.debugf(m, "success, ->[S%v], req: %v, resp: %v, state: ",
+			server, toJson(req), toJson(resp))
 		rf.NextIndex[server] = max(rf.NextIndex[server], nextIndex)
 		rf.MatchIndex[server] = max(rf.MatchIndex[server], nextIndex-1)
 		rf.TryUpdateCommitIndex()
