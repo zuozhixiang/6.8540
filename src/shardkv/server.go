@@ -3,6 +3,7 @@ package shardkv
 import (
 	"6.5840/labrpc"
 	"6.5840/shardctrler"
+	"fmt"
 	"sync/atomic"
 )
 import "6.5840/raft"
@@ -86,11 +87,14 @@ func (kv *ShardKV) isLeader() bool {
 	return ret
 }
 
+func (kv *ShardKV) checkShard(shard int) bool {
+	_, ok := kv.shards[shard]
+	return ok
+}
+
 func (kv *ShardKV) checkExecuted(id int64, shard int) bool {
-	if _, ok := kv.executed[shard][id]; ok {
-		return true
-	}
-	return false
+	_, ok := kv.executed[shard][id]
+	return ok
 }
 
 func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
@@ -108,9 +112,14 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 	kv.lock()
 	defer kv.unlock()
 	shard := key2shard(req.Key)
-	if _, ok := kv.shards[shard]; !ok {
+	if !kv.checkShard(shard) {
 		resp.Err = ErrWrongGroup
 		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group", req.ID, shard)
+		return
+	}
+	if _, ok := kv.NoReadyShardSet[shard]; ok {
+		resp.Err = ErrShardNoReady
+		debugf(m, kv.me, kv.gid, "id: %v, shard not ready: %v", req.ID, shard)
 		return
 	}
 	resp.Err = OK
@@ -148,6 +157,11 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
 		}
 	}
+	if !kv.checkShard(shard) {
+		resp.Err = ErrWrongGroup
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.shards))
+		return
+	}
 	if !kv.isLeader() {
 		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
 		resp.Err = ErrWrongLeader
@@ -159,7 +173,8 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 		return
 	}
 	if _, ok := kv.versionData[shard][op.ID]; !ok {
-		panic("empty")
+		errMsg := fmt.Sprintf("shard: %v, req:%v, id: %v", shard, toJson(req), op.ID)
+		panic(errMsg)
 	}
 	res := kv.versionData[shard][op.ID]
 	if res == "" {
@@ -188,17 +203,22 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 
 	shard := key2shard(req.Key)
 
-	if _, ok := kv.shards[shard]; !ok {
+	if !kv.checkShard(shard) {
 		resp.Err = ErrWrongGroup
 		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.shards))
 		return
 	}
-
+	if _, ok := kv.NoReadyShardSet[shard]; ok {
+		resp.Err = ErrShardNoReady
+		debugf(m, kv.me, kv.gid, "id: %v, shard not ready: %v, noready: %v", req.ID, shard, toJson(kv.NoReadyShardSet))
+		return
+	}
 	resp.Err = OK
 	if kv.checkExecuted(req.ID, shard) {
 		debugf(m, kv.me, kv.gid, "Executed, id: %v", req.ID)
 		return
 	}
+
 	op := Op{
 		ID:    req.ID,
 		Type:  PutType,
@@ -226,6 +246,11 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 		default:
 			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
 		}
+	}
+	if !kv.checkShard(shard) {
+		resp.Err = ErrWrongGroup
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.shards))
+		return
 	}
 	if !kv.isLeader() {
 		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))

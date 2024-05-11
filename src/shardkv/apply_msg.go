@@ -9,34 +9,37 @@ func (kv *ShardKV) executeOp(op Op, shard int) string {
 	switch op.Type {
 	case PutType:
 		{
-			kv.executed[shard][op.ID] = true
 			shard := key2shard(op.Key)
+			kv.executed[shard][op.ID] = true
 			kv.data[shard][op.Key] = op.Value
 			return op.Value
 		}
 	case AppendType:
 		{
-			kv.executed[shard][op.ID] = true
 			shard := key2shard(op.Key)
+			kv.executed[shard][op.ID] = true
 			kv.data[shard][op.Key] = kv.data[shard][op.Key] + op.Value
 			return kv.data[shard][op.Key]
 		}
 	case GetType:
 		{
-			kv.executed[shard][op.ID] = true
 			shard := key2shard(op.Key)
+			kv.executed[shard][op.ID] = true
 			kv.versionData[shard][op.ID] = kv.data[shard][op.Key]
 			return kv.data[shard][op.Key]
 		}
 	case SyncConfigType:
 		{
+			oldConfig := kv.ShardConfig
 			kv.ShardConfig = op.Config
 			kv.shards = getSelfShards(op.Config.Shards, kv.gid)
 			add := op.NeedAddShards
 			remove := op.NeedRemoveShards
 			for _, shard := range add {
 				//  need to wait new add shards come
-				kv.NoReadyShardSet[shard] = true
+				if oldConfig.Shards[shard] != 0 {
+					kv.NoReadyShardSet[shard] = true
+				}
 			}
 			// remove, shard data
 			for _, shard := range remove {
@@ -44,7 +47,12 @@ func (kv *ShardKV) executeOp(op Op, shard int) string {
 				kv.versionData[shard] = map[int64]string{}
 				kv.executed[shard] = map[int64]bool{}
 			}
-			debugf(Apply, kv.me, kv.gid, "sync Config: %v", toJson(kv.ShardConfig))
+			if kv.isLeader() {
+				for _, shard := range remove {
+					kv.SendShard(shard, op.Config.Shards[shard])
+				}
+			}
+			debugf(Apply, kv.me, kv.gid, "sync Config: %v, state: %v", toJson(kv.ShardConfig), toJson(kv.data))
 			return ""
 		}
 	case GetShardType:
@@ -55,7 +63,7 @@ func (kv *ShardKV) executeOp(op Op, shard int) string {
 			kv.executed[shard] = shardData.Executed
 			kv.versionData[shard] = shardData.VersionData
 			delete(kv.NoReadyShardSet, shard)
-			debugf(Apply, kv.me, kv.gid, "get shard: %v, id:%v", op.ID)
+			debugf(Apply, kv.me, kv.gid, "get shard: %v, id:%v, NoReady:%v", shard, op.ID, kv.NoReadyShardSet)
 			return ""
 		}
 	case DeleteType:
@@ -83,7 +91,6 @@ func formatCmd(op Op) string {
 }
 
 func (kv *ShardKV) applyMsgForStateMachine() {
-
 	for {
 		if kv.killed() {
 			return
@@ -105,15 +112,15 @@ func (kv *ShardKV) applyMsgForStateMachine() {
 				lastApplied = msg.CommandIndex
 				op := msg.Command.(Op)
 				shard := key2shard(op.Key)
+
 				if op.Type == GetShardType {
 					if kv.moveExecuted[op.ID] {
 						continue
 					}
 					shard = op.ShardData.Shard
-				} else if op.Type != SyncConfigType && kv.checkExecuted(op.ID, shard) {
+				} else if op.Type != SyncConfigType && (!kv.checkShard(shard) || kv.checkExecuted(op.ID, shard)) {
 					continue
 				}
-
 				res := kv.executeOp(op, shard)
 				op.Value = res
 				debugf(Apply, kv.me, kv.gid, "idx: %v, %v", msg.CommandIndex, formatCmd(op))

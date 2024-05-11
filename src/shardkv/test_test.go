@@ -181,35 +181,39 @@ func TestJoinLeave5B(t *testing.T) {
 	defer cfg.cleanup()
 
 	ck := cfg.makeClient(cfg.ctl)
-
+	logger.Infof("join 100")
 	cfg.join(0)
 
 	n := 10
 	ka := make([]string, n)
 	va := make([]string, n)
+
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(5)
+		logger.Infof("put: [%v]: [%v]", ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 	}
-
+	logger.Infof("join 101")
 	cfg.join(1)
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 		x := randstring(5)
+		logger.Infof("append: [%v]: [%v]", ka[i], va[i])
 		ck.Append(ka[i], x)
 		va[i] += x
 	}
-
+	logger.Infof("leave 100")
 	cfg.leave(0)
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 		x := randstring(5)
+		logger.Infof("append: [%v]: [%v]", ka[i], va[i])
 		ck.Append(ka[i], x)
 		va[i] += x
 	}
