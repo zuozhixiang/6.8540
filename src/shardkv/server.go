@@ -64,14 +64,16 @@ type ShardKV struct {
 	versionData [shardctrler.NShards]map[int64]string
 
 	// move shard dupucated check
-	moveExecuted     map[int64]bool
-	NoReadyShardSet  map[int]bool
+	moveExecuted map[int64]bool
+
 	lastAppliedIndex int
 	cond             *sync.Cond
 	persiter         *raft.Persister
 	mck              *shardctrler.Clerk
 	ShardConfig      shardctrler.Config
 	shards           map[int]bool
+	NoReadyShardSet  map[int]bool
+	HoldShards       [shardctrler.NShards]bool
 }
 
 func (kv *ShardKV) lock() {
@@ -333,6 +335,9 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
 	kv.persiter = persister
 	kv.NoReadyShardSet = map[int]bool{}
+	kv.HoldShards = [10]bool{}
+	kv.applySnapshot(persister.ReadSnapshot())
+	logger.Infof("start [G%v][S%v], state: %v", gid, kv.me, toJson(kv.data))
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.applyMsgForStateMachine()

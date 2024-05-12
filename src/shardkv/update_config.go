@@ -2,6 +2,8 @@ package shardkv
 
 import (
 	"6.5840/shardctrler"
+	"fmt"
+	"runtime"
 	"time"
 )
 
@@ -48,23 +50,24 @@ func getAddAndRemove(oldShards [shardctrler.NShards]int, newShards [shardctrler.
 
 func (kv *ShardKV) sendShard(me int, fromgid int, togid int, req *MoveShardArgs, groups []string) {
 	resp := &MoveShardReply{}
-	defer debugf(SendShard, me, fromgid, "->[g%v] success", togid)
+	defer debugf(SendShard, me, fromgid, "->[g%v] success, req:%v", togid, toJson(req))
 	for kv.isLeader() && !kv.killed() {
 		for _, srvname := range groups {
 			srv := kv.make_end(srvname)
 			debugf(SendShard, me, fromgid, "->[g%v]%v, req: %v", togid, srvname, toJson(req))
 			ok := srv.Call("ShardKV.MoveShard", req, resp)
 			if ok && resp.Err == OK {
-				debugf(SendShard, me, fromgid, "success ->[g%v]%v, id:%v shard: %v", togid, srvname, req.ID, req.ShardData)
+				debugf(SendShard, me, fromgid, "success ->[g%v]%v, id:%v req: %v", togid, srvname, req.ID, toJson(req))
 				return
 			} else if ok && resp.Err == ErrWrongGroup {
 				debugf(SendShard, me, fromgid, "fatal fail wrong group  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
-				return
+				panic(resp.Err)
 			} else if ok && resp.Err == ErrWrongLeader {
 				debugf(SendShard, me, fromgid, "fail wrong leader  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
 			} else if ok && resp.Err == ErrOldVersion {
-				debugf(SendShard, me, fromgid, "fatal fail old config  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
-				return
+				// debugf(SendShard, me, fromgid, "fatal fail old config  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
+				msg := "old config" + toJson(req)
+				panic(msg)
 			}
 		}
 	}
@@ -98,22 +101,45 @@ func (kv *ShardKV) updateConfigHelper(lastConfig shardctrler.Config) {
 			NeedAddShards:    add,
 			Config:           lastConfig,
 		}
+		debugf(Config, kv.me, kv.gid, "Op: %v", toJson(op))
 		my := getSelfShards(lastConfig.Shards, kv.gid)
 		index, _, _ := kv.rf.Start(op)
-		debugf(Config, kv.me, kv.gid, "index: %v,my:%v, allocated: %v, newConfig: %v,", index, my, toJson(shardctrler.GetGIDShards(lastConfig.Shards)), toJson(lastConfig))
+		debugf(Config, kv.me, kv.gid, "index: %v,my:%v, allocated: %v, newConfig: %v,", index, toJson(my), toJson(shardctrler.GetGIDShards(lastConfig.Shards)), toJson(lastConfig))
 	}
 }
 
+func getGoroutineID() int {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idStr := string(buf[:n])
+
+	var id int
+	fmt.Sscanf(idStr, "goroutine %d", &id)
+
+	return id
+}
+
 func (kv *ShardKV) UpdateConfig() {
+	i := 0
 	for !kv.killed() {
 		if kv.isLeader() {
-			lastConfig := kv.mck.Query(-1)
-			debugf(Method("GetConfig"), kv.me, kv.gid, "config: %v", toJson(lastConfig))
+			kv.lock()
+			num := kv.ShardConfig.Num + 1
+			if len(kv.NoReadyShardSet) > 0 {
+				i++
+				debugf(Config, kv.me, kv.gid, "i: %v,remained no ready:%v", i, toJson(kv.NoReadyShardSet))
+				kv.unlock()
+				time.Sleep(34 * time.Millisecond)
+				continue
+			}
+			kv.unlock()
+			lastConfig := kv.mck.Query(num)
+			debugf(Config, kv.me, kv.gid, "config: %v", toJson(lastConfig))
 			kv.lock()
 			kv.updateConfigHelper(lastConfig)
 			kv.unlock()
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(90 * time.Millisecond)
 	}
 }
 
@@ -138,18 +164,17 @@ func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
 		debugf(m, kv.me, kv.gid, "id:%v, executed", req.ID)
 		return
 	}
+	if req.ShardConfig.Num > kv.ShardConfig.Num+1 {
+		errMsg := fmt.Sprintf("%v > %v", req.ShardConfig.Num, kv.ShardConfig.Num)
+		debugf(m, kv.me, kv.gid, "errmsg:%v, req: %v, selfConfig: %v", errMsg, toJson(req), toJson(kv.ShardConfig))
+	}
 	if req.ShardConfig.Num > kv.ShardConfig.Num {
 		// request config is newer
-		debugf(m, kv.me, kv.gid, "id:%v, update config", req.ID)
+		debugf(m, kv.me, kv.gid, "id:%v, shard: %v, update config", req.ID, req.Shard)
 		kv.updateConfigHelper(req.ShardConfig)
 	} else if req.ShardConfig.Num < kv.ShardConfig.Num {
 		resp.Err = ErrOldVersion
 		debugf(m, kv.me, kv.gid, "id:%v, old config, self: %v, other: %v", req.ID, toJson(kv.ShardConfig), toJson(req.ShardConfig))
-		return
-	}
-	shard := req.Shard
-	if kv.ShardConfig.Shards[shard] != kv.gid {
-		resp.Err = ErrWrongGroup
 		return
 	}
 	op := Op{
@@ -162,12 +187,12 @@ func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
 			Executed:    Copy(req.Executed).(map[int64]bool),
 		},
 	}
+	debugf(m, kv.me, kv.gid, "start Op: %v", toJson(op))
 	index, _, isleader := kv.rf.Start(op)
 	if !isleader {
 		resp.Err = ErrWrongLeader
 		return
 	}
-	debugf(m, kv.me, kv.gid, "req: %v", formateMoveShardArgs(req))
 	timeoutChan := make(chan bool, 1)
 	go startTimeout(kv.cond, timeoutChan)
 	timeout := false
@@ -189,4 +214,5 @@ func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
 		debugf(m, kv.me, kv.gid, "timeout!, req: %v", toJson(req))
 		return
 	}
+	debugf(m, kv.me, kv.gid, "success, req:%v, holdonsharsds:%v, state:%v", toJson(req), toJson(kv.HoldShards), toJson(kv.data))
 }

@@ -32,27 +32,41 @@ func (kv *ShardKV) executeOp(op Op, shard int) string {
 		{
 			oldConfig := kv.ShardConfig
 			kv.ShardConfig = op.Config
-			kv.shards = getSelfShards(op.Config.Shards, kv.gid)
-			add := op.NeedAddShards
-			remove := op.NeedRemoveShards
+			kv.shards = getSelfShards(op.Config.Shards, kv.gid) // all shards need
+			add := op.NeedAddShards                             // need to add
+			remove := op.NeedRemoveShards                       // need to remove
+
+			// update hold shards
+			for _, shard := range add {
+				if oldConfig.Shards[shard] == 0 {
+					kv.HoldShards[shard] = true
+				}
+			}
+			for _, shard := range remove {
+				kv.HoldShards[shard] = false
+			}
+
 			for _, shard := range add {
 				//  need to wait new add shards come
-				if oldConfig.Shards[shard] != 0 {
+				if !kv.HoldShards[shard] {
 					kv.NoReadyShardSet[shard] = true
 				}
 			}
+			// need to send shard to other group
+			if kv.isLeader() {
+				for _, shard := range remove {
+					kv.SendShard(shard, op.Config.Shards[shard])
+				}
+			}
+
 			// remove, shard data
 			for _, shard := range remove {
 				kv.data[shard] = map[string]string{}
 				kv.versionData[shard] = map[int64]string{}
 				kv.executed[shard] = map[int64]bool{}
 			}
-			if kv.isLeader() {
-				for _, shard := range remove {
-					kv.SendShard(shard, op.Config.Shards[shard])
-				}
-			}
-			debugf(Apply, kv.me, kv.gid, "sync Config: %v, state: %v", toJson(kv.ShardConfig), toJson(kv.data))
+
+			debugf(Apply, kv.me, kv.gid, "sync Config: %v,hold: %v, noready: %v,state: %v, ", toJson(kv.ShardConfig), toJson(kv.HoldShards), toJson(kv.NoReadyShardSet), toJson(kv.data))
 			return ""
 		}
 	case GetShardType:
@@ -63,7 +77,8 @@ func (kv *ShardKV) executeOp(op Op, shard int) string {
 			kv.executed[shard] = shardData.Executed
 			kv.versionData[shard] = shardData.VersionData
 			delete(kv.NoReadyShardSet, shard)
-			debugf(Apply, kv.me, kv.gid, "get shard: %v, id:%v, NoReady:%v", shard, op.ID, kv.NoReadyShardSet)
+			kv.HoldShards[shard] = true
+			debugf(Apply, kv.me, kv.gid, "get shard: %v, id:%v, NoReady:%v, holdShard:%v, data: %v", shard, op.ID, toJson(kv.NoReadyShardSet), toJson(kv.HoldShards), toJson(kv.data))
 			return ""
 		}
 	case DeleteType:
@@ -84,6 +99,7 @@ var opmap = map[OpType]string{
 	AppendType:     string(AppendMethod),
 	SyncConfigType: "SyncConfig",
 	DeleteType:     "Delete",
+	GetShardType:   "GetShard",
 }
 
 func formatCmd(op Op) string {

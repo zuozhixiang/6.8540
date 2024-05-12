@@ -239,6 +239,7 @@ func TestSnapshot5B(t *testing.T) {
 
 	ck := cfg.makeClient(cfg.ctl)
 
+	logger.Infof("join 100")
 	cfg.join(0)
 
 	n := 30
@@ -252,7 +253,7 @@ func TestSnapshot5B(t *testing.T) {
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 	}
-
+	logger.Infof("join 101 102, leave 100")
 	cfg.join(1)
 	cfg.join(2)
 	cfg.leave(0)
@@ -263,7 +264,7 @@ func TestSnapshot5B(t *testing.T) {
 		ck.Append(ka[i], x)
 		va[i] += x
 	}
-
+	logger.Infof("leave 101, join 100")
 	cfg.leave(1)
 	cfg.join(0)
 
@@ -283,11 +284,11 @@ func TestSnapshot5B(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	cfg.checklogs()
-
+	logger.Infof("shutdown 100-102")
 	cfg.ShutdownGroup(0)
 	cfg.ShutdownGroup(1)
 	cfg.ShutdownGroup(2)
-
+	logger.Infof("start 101-102")
 	cfg.StartGroup(0)
 	cfg.StartGroup(1)
 	cfg.StartGroup(2)
