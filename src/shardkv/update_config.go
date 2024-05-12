@@ -164,18 +164,18 @@ func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
 		debugf(m, kv.me, kv.gid, "id:%v, executed", req.ID)
 		return
 	}
-	if req.ShardConfig.Num > kv.ShardConfig.Num+1 {
-		errMsg := fmt.Sprintf("%v > %v", req.ShardConfig.Num, kv.ShardConfig.Num)
-		debugf(m, kv.me, kv.gid, "errmsg:%v, req: %v, selfConfig: %v", errMsg, toJson(req), toJson(kv.ShardConfig))
-	}
+	//if req.ShardConfig.Num > kv.ShardConfig.Num+1 {
+	//	errMsg := fmt.Sprintf("%v > %v", req.ShardConfig.Num, kv.ShardConfig.Num)
+	//	debugf(m, kv.me, kv.gid, "errmsg:%v, req: %v, selfConfig: %v", errMsg, toJson(req), toJson(kv.ShardConfig))
+	//}
 	if req.ShardConfig.Num > kv.ShardConfig.Num {
 		// request config is newer
 		debugf(m, kv.me, kv.gid, "id:%v, shard: %v, update config", req.ID, req.Shard)
 		kv.updateConfigHelper(req.ShardConfig)
 	} else if req.ShardConfig.Num < kv.ShardConfig.Num {
-		resp.Err = ErrOldVersion
-		debugf(m, kv.me, kv.gid, "id:%v, old config, self: %v, other: %v", req.ID, toJson(kv.ShardConfig), toJson(req.ShardConfig))
-		return
+		//resp.Err = ErrOldVersion
+		//debugf(m, kv.me, kv.gid, "id:%v, old config, self: %v, other: %v", req.ID, toJson(kv.ShardConfig), toJson(req.ShardConfig))
+		//return
 	}
 	op := Op{
 		ID:   req.ID,
