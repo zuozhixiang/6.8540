@@ -52,7 +52,8 @@ func (kv *ShardKV) sendShard(me int, fromgid int, togid int, req *MoveShardArgs,
 	resp := &MoveShardReply{}
 	defer debugf(SendShard, me, fromgid, "->[g%v] success, req:%v", togid, toJson(req))
 	for kv.isLeader() && !kv.killed() {
-		for _, srvname := range groups {
+		for i := 0; i < len(groups); i++ {
+			srvname := groups[i]
 			srv := kv.make_end(srvname)
 			debugf(SendShard, me, fromgid, "->[g%v]%v, req: %v", togid, srvname, toJson(req))
 			ok := srv.Call("ShardKV.MoveShard", req, resp)
@@ -68,6 +69,10 @@ func (kv *ShardKV) sendShard(me int, fromgid int, togid int, req *MoveShardArgs,
 				// debugf(SendShard, me, fromgid, "fatal fail old config  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
 				msg := "old config" + toJson(req)
 				panic(msg)
+			} else if ok && resp.Err == ErrWaiting {
+				debugf(SendShard, me, fromgid, "id: %v, need to wait", req.ID)
+				time.Sleep(10 * time.Millisecond)
+				i--
 			}
 		}
 	}
@@ -75,9 +80,9 @@ func (kv *ShardKV) sendShard(me int, fromgid int, togid int, req *MoveShardArgs,
 
 func (kv *ShardKV) SendShard(shard int, gid int) {
 	// get shard data,
-	data := Copy(kv.data[shard]).(map[string]string)
-	versionData := Copy(kv.versionData[shard]).(map[int64]string)
-	executed := Copy(kv.executed[shard]).(map[int64]bool)
+	data := Copy(kv.Data[shard]).(map[string]string)
+	versionData := Copy(kv.VersionData[shard]).(map[int64]string)
+	executed := Copy(kv.Executed[shard]).(map[int64]bool)
 	shardConfig := Copy(kv.ShardConfig).(shardctrler.Config)
 	req := &MoveShardArgs{
 		ID:          nrand(),
@@ -90,12 +95,16 @@ func (kv *ShardKV) SendShard(shard int, gid int) {
 	go kv.sendShard(kv.me, kv.gid, gid, req, kv.ShardConfig.Groups[gid])
 }
 
-func (kv *ShardKV) updateConfigHelper(lastConfig shardctrler.Config) {
+func (kv *ShardKV) updateConfigHelper(lastConfig shardctrler.Config, ID int64) {
 	if lastConfig.Num > kv.ShardConfig.Num {
 		oldConf := kv.ShardConfig
 		add, remove := getAddAndRemove(oldConf.Shards, lastConfig.Shards, kv.gid)
 		// need to sync other servers in the group
+		if ID == 0 {
+			ID = nrand()
+		}
 		op := Op{
+			ID:               ID,
 			Type:             SyncConfigType,
 			NeedRemoveShards: remove,
 			NeedAddShards:    add,
@@ -104,7 +113,7 @@ func (kv *ShardKV) updateConfigHelper(lastConfig shardctrler.Config) {
 		debugf(Config, kv.me, kv.gid, "Op: %v", toJson(op))
 		my := getSelfShards(lastConfig.Shards, kv.gid)
 		index, _, _ := kv.rf.Start(op)
-		debugf(Config, kv.me, kv.gid, "index: %v,my:%v, allocated: %v, newConfig: %v,", index, toJson(my), toJson(shardctrler.GetGIDShards(lastConfig.Shards)), toJson(lastConfig))
+		debugf(Config, kv.me, kv.gid, "index: %v,my:%v, allocated: %v, newConfig: %v, state:%v", index, toJson(my), toJson(shardctrler.GetGIDShards(lastConfig.Shards)), toJson(lastConfig), toJson(kv.Data))
 	}
 }
 
@@ -120,27 +129,31 @@ func getGoroutineID() int {
 }
 
 func (kv *ShardKV) UpdateConfig() {
-	i := 0
 	for !kv.killed() {
 		if kv.isLeader() {
 			kv.lock()
 			num := kv.ShardConfig.Num + 1
-			if len(kv.NoReadyShardSet) > 0 {
-				i++
-				debugf(Config, kv.me, kv.gid, "i: %v,remained no ready:%v", i, toJson(kv.NoReadyShardSet))
-				kv.unlock()
-				time.Sleep(34 * time.Millisecond)
-				continue
-			}
 			kv.unlock()
+			if num > 1 {
+				num = -1
+			}
 			lastConfig := kv.mck.Query(num)
-			debugf(Config, kv.me, kv.gid, "config: %v", toJson(lastConfig))
 			kv.lock()
-			kv.updateConfigHelper(lastConfig)
+			debugf(Config, kv.me, kv.gid, "config: %v, state:%v", toJson(lastConfig), toJson(kv.Data))
+			kv.updateConfigHelper(lastConfig, 0)
 			kv.unlock()
 		}
 		time.Sleep(90 * time.Millisecond)
 	}
+}
+
+func (kv *ShardKV) RequestUpdate(ID int64) {
+	num := kv.ShardConfig.Num + 1
+	kv.unlock()
+	lastConfig := kv.mck.Query(num)
+	kv.lock()
+	debugf(Config, kv.me, kv.gid, "self: %v, last: %v", toJson(kv.ShardConfig), toJson(lastConfig))
+	kv.updateConfigHelper(lastConfig, ID)
 }
 
 func formateMoveShardArgs(req *MoveShardArgs) string {
@@ -160,7 +173,7 @@ func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
 	kv.lock()
 	defer kv.unlock()
 	resp.Err = OK
-	if _, ok := kv.moveExecuted[req.ID]; ok {
+	if _, ok := kv.MoveExecuted[req.ID]; ok {
 		debugf(m, kv.me, kv.gid, "id:%v, executed", req.ID)
 		return
 	}
@@ -170,16 +183,22 @@ func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
 	//}
 	if req.ShardConfig.Num > kv.ShardConfig.Num {
 		// request config is newer
-		debugf(m, kv.me, kv.gid, "id:%v, shard: %v, update config", req.ID, req.Shard)
-		kv.updateConfigHelper(req.ShardConfig)
+		//debugf(m, kv.me, kv.gid, "id:%v, shard: %v, update config", req.ID, req.Shard)
+		//kv.updateConfigHelper(req.ShardConfig)
+		debugf(m, kv.me, kv.gid, "id:%v, shard: %v, update config, %v < %v", req.ID, req.Shard, kv.ShardConfig.Num, req.ShardConfig.Num)
+		resp.Err = ErrWaiting
+		kv.RequestUpdate(req.ID)
+		return
 	} else if req.ShardConfig.Num < kv.ShardConfig.Num {
 		//resp.Err = ErrOldVersion
 		//debugf(m, kv.me, kv.gid, "id:%v, old config, self: %v, other: %v", req.ID, toJson(kv.ShardConfig), toJson(req.ShardConfig))
-		//return
+		resp.Err = ErrOldVersion
+		return
 	}
 	op := Op{
-		ID:   req.ID,
-		Type: GetShardType,
+		ID:     req.ID,
+		Type:   GetShardType,
+		Config: req.ShardConfig,
 		ShardData: &ShardData{
 			Shard:       req.Shard,
 			Data:        Copy(req.ShardData).(map[string]string),
@@ -214,5 +233,5 @@ func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
 		debugf(m, kv.me, kv.gid, "timeout!, req: %v", toJson(req))
 		return
 	}
-	debugf(m, kv.me, kv.gid, "success, req:%v, holdonsharsds:%v, state:%v", toJson(req), toJson(kv.HoldShards), toJson(kv.data))
+	debugf(m, kv.me, kv.gid, "success, req:%v, holdonsharsds:%v, state:%v", toJson(req), toJson(kv.HoldShards), toJson(kv.Data))
 }

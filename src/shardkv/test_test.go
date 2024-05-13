@@ -240,7 +240,7 @@ func TestSnapshot5B(t *testing.T) {
 	ck := cfg.makeClient(cfg.ctl)
 
 	logger.Infof("join 100")
-	cfg.join(0)
+	cfg.join(0) // config1
 
 	n := 30
 	ka := make([]string, n)
@@ -248,30 +248,33 @@ func TestSnapshot5B(t *testing.T) {
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(20)
+		logger.Infof("put %v:%v", ka[i], va[i])
 		ck.Put(ka[i], va[i])
 	}
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 	}
 	logger.Infof("join 101 102, leave 100")
-	cfg.join(1)
-	cfg.join(2)
-	cfg.leave(0)
+	cfg.join(1)  // config2
+	cfg.join(2)  // config3
+	cfg.leave(0) // config4
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 		x := randstring(20)
 		ck.Append(ka[i], x)
+		logger.Infof("append %v:%v", ka[i], va[i])
 		va[i] += x
 	}
 	logger.Infof("leave 101, join 100")
-	cfg.leave(1)
-	cfg.join(0)
+	cfg.leave(1) // config5
+	cfg.join(0)  // config6
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 		x := randstring(20)
 		ck.Append(ka[i], x)
+		logger.Infof("append %v:%v", ka[i], va[i])
 		va[i] += x
 	}
 
@@ -288,7 +291,7 @@ func TestSnapshot5B(t *testing.T) {
 	cfg.ShutdownGroup(0)
 	cfg.ShutdownGroup(1)
 	cfg.ShutdownGroup(2)
-	logger.Infof("start 101-102")
+	logger.Infof("start 100-102")
 	cfg.StartGroup(0)
 	cfg.StartGroup(1)
 	cfg.StartGroup(2)

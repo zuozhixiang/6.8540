@@ -16,6 +16,7 @@ const (
 	ErrNoKey        = "ErrNoKey"
 	ErrWrongGroup   = "ErrWrongGroup"
 	ErrWrongLeader  = "ErrWrongLeader"
+	ErrWaiting      = "ErrWaiting"
 	ErrTimeout      = "ErrTimeout"
 	ErrShardNoReady = "ErrShardNoReady"
 	ErrOldVersion   = "ErrOldVersion"

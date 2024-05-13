@@ -65,7 +65,7 @@ const (
 	Start        Method = "Start1"
 	SendNotify   Method = "SendNoti"
 	Notify       Method = "Notify"
-	Config       Method = "Config"
+	Config       Method = "GetConfig"
 	SendShard    Method = "SendShard"
 	GetShard     Method = "GetShard"
 )

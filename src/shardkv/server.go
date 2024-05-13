@@ -59,19 +59,19 @@ type ShardKV struct {
 
 	// Your definitions here.
 	dead        int32
-	data        [shardctrler.NShards]map[string]string
-	executed    [shardctrler.NShards]map[int64]bool
-	versionData [shardctrler.NShards]map[int64]string
+	Data        [shardctrler.NShards]map[string]string
+	Executed    [shardctrler.NShards]map[int64]bool
+	VersionData [shardctrler.NShards]map[int64]string
 
 	// move shard dupucated check
-	moveExecuted map[int64]bool
+	MoveExecuted map[int64]bool
 
 	lastAppliedIndex int
 	cond             *sync.Cond
 	persiter         *raft.Persister
 	mck              *shardctrler.Clerk
 	ShardConfig      shardctrler.Config
-	shards           map[int]bool
+	Shards           map[int]bool
 	NoReadyShardSet  map[int]bool
 	HoldShards       [shardctrler.NShards]bool
 }
@@ -90,12 +90,12 @@ func (kv *ShardKV) isLeader() bool {
 }
 
 func (kv *ShardKV) checkShard(shard int) bool {
-	_, ok := kv.shards[shard]
+	_, ok := kv.Shards[shard]
 	return ok
 }
 
 func (kv *ShardKV) checkExecuted(id int64, shard int) bool {
-	_, ok := kv.executed[shard][id]
+	_, ok := kv.Executed[shard][id]
 	return ok
 }
 
@@ -126,10 +126,10 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 	}
 	resp.Err = OK
 	if kv.checkExecuted(req.ID, shard) {
-		if _, ok := kv.versionData[shard][req.ID]; !ok {
+		if _, ok := kv.VersionData[shard][req.ID]; !ok {
 			panic(req.ID)
 		}
-		resp.Value = kv.versionData[shard][req.ID]
+		resp.Value = kv.VersionData[shard][req.ID]
 		debugf(m, kv.me, kv.gid, "Executed, id: %v", req.ID)
 		return
 	}
@@ -161,7 +161,7 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 	}
 	if !kv.checkShard(shard) {
 		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.shards))
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.Shards))
 		return
 	}
 	if !kv.isLeader() {
@@ -174,11 +174,11 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 		debugf(m, kv.me, kv.gid, "timeout!, req: %v", toJson(req))
 		return
 	}
-	if _, ok := kv.versionData[shard][op.ID]; !ok {
+	if _, ok := kv.VersionData[shard][op.ID]; !ok {
 		errMsg := fmt.Sprintf("shard: %v, req:%v, id: %v", shard, toJson(req), op.ID)
 		panic(errMsg)
 	}
-	res := kv.versionData[shard][op.ID]
+	res := kv.VersionData[shard][op.ID]
 	if res == "" {
 		debugf(m, kv.me, kv.gid, "warning, req:%v", toJson(req))
 	}
@@ -207,7 +207,7 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 
 	if !kv.checkShard(shard) {
 		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.shards))
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv))
 		return
 	}
 	if _, ok := kv.NoReadyShardSet[shard]; ok {
@@ -251,7 +251,7 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 	}
 	if !kv.checkShard(shard) {
 		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.shards))
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.Shards))
 		return
 	}
 	if !kv.isLeader() {
@@ -274,7 +274,11 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
 	atomic.StoreInt32(&kv.dead, 1)
-	debugf(KILL, kv.me, kv.gid, "")
+	kv.lock()
+	defer kv.unlock()
+	dumps := kv.dumpData()
+	kv.rf.Snapshot(kv.lastAppliedIndex, dumps)
+	debugf(KILL, kv.me, kv.gid, "state: %v", toJson(kv))
 }
 func (kv *ShardKV) killed() bool {
 	ret := atomic.LoadInt32(&kv.dead)
@@ -325,11 +329,11 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
 	kv.dead = 0
 	for i := 0; i < shardctrler.NShards; i++ {
-		kv.data[i] = map[string]string{}
-		kv.executed[i] = map[int64]bool{}
-		kv.versionData[i] = map[int64]string{}
+		kv.Data[i] = map[string]string{}
+		kv.Executed[i] = map[int64]bool{}
+		kv.VersionData[i] = map[int64]string{}
 	}
-	kv.moveExecuted = map[int64]bool{}
+	kv.MoveExecuted = map[int64]bool{}
 	kv.lastAppliedIndex = 0
 	kv.cond = sync.NewCond(&kv.mu)
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
@@ -337,11 +341,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.NoReadyShardSet = map[int]bool{}
 	kv.HoldShards = [10]bool{}
 	kv.applySnapshot(persister.ReadSnapshot())
-	logger.Infof("start [G%v][S%v], state: %v", gid, kv.me, toJson(kv.data))
+
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.applyMsgForStateMachine()
 	go kv.dectionMaxSize()
 	go kv.UpdateConfig()
+	logger.Infof("start [G%v][S%v], state: %v", gid, kv.me, toJson(kv))
 	return kv
 }
