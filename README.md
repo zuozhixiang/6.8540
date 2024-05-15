@@ -18,7 +18,7 @@ For more details, please refer to the paper [extended Raft paper](https://pdos.c
 Raft adopts the approach of replicating the state machine to synchronize data.
 ![img_6.png](imgs/img_6.png) <br>
 The RPC interfaces for leader election and log append in Raft are as follows:
-![img_4.png](imgs/img_4.png)
+![img_4.png](imgs/img_4.png) <br>
 The RPC interfaces for snapshot implementation in Raft are as follows:
 ![img_5.png](imgs/img_5.png)
 
