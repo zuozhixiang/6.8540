@@ -5,7 +5,7 @@ The 'mr' directory contains the implementation code for MapReduce. <br>
 The master node is responsible for distributing map and reduce tasks to worker nodes. Worker nodes receive the tasks and proceed to complete the map or reduce tasks.
 The output of map tasks is written to a shared location, such as GFS (Google File System) or similar storage.
 Reduce tasks retrieve the intermediate results, complete the reduce task, and write the results to the output files.
-![img_1.png](img_1.png)
+![img_1.png](imgs/img_1.png)
 ## Lab2 KVServer
 building a key/value server for a single machine that ensures that each operation is executed **exactly once** despite network failures and that the operations are **linearizable**. <br>
 The 'kvsrv' directory contains the implementation code for KVserver and client.This lab is a transition from Lab 3 to Lab 4.<br>
@@ -16,11 +16,11 @@ Raft is a consensus algorithm designed for distributed systems. It provides a re
 the lab is to implement Raft, a distributed consensus algorithm, including **leader election**, **log replication**, **crash recovery** and **log compaction**.
 For more details, please refer to the paper [extended Raft paper](https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf) The 'raft' directory contains the implementation code for raft. <br>
 Raft adopts the approach of replicating the state machine to synchronize data.
-![img_6.png](img_6.png) <br>
+![img_6.png](imgs/img_6.png) <br>
 The RPC interfaces for leader election and log append in Raft are as follows:
-![img_4.png](img_4.png)
+![img_4.png](imgs/img_4.png)
 The RPC interfaces for snapshot implementation in Raft are as follows:
-![img_5.png](img_5.png)
+![img_5.png](imgs/img_5.png)
 
 ## Lab4 KVRaft
 In this lab, building a fault-tolerant key/value storage service using your Raft library from Lab 3 in one group.
@@ -33,7 +33,7 @@ The following are the RPC interfaces provided externally: <br>
 `Get(key)`: fetches the current value of the key (returning the empty string for non-existent keys) <br>
 <br>
 The following diagram demonstrates how Raft interacts with the upper-level application: <br>
-![img_7.png](img_7.png)
+![img_7.png](imgs/img_7.png)
 
 ## Lab5 ShardKV
 sharded key/value store will have two main components. First,First, a set of replica groups. Each replica group is responsible for a subset of the shards, using Raft replication.
@@ -42,4 +42,4 @@ There is a single shard controller for the whole system, implemented as a fault-
 The 'shardctrler' directory contains the implementation of the shard controller, while the 'shardkv' directory contains the implementation of the KV service
 
 The following diagram illustrates the interaction between the client, shard controller, and KV group. <br>
-![img_8.png](img_8.png)
+![img_8.png](imgs/img_8.png)
