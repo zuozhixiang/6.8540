@@ -1,4 +1,4 @@
-# 分布式KV系统 
+# 分布式系统 
 ## Lab1 MapReduce
 Implement a simple MapReduce framework based on the MapReduce paper.The 'mrapps' directory is where user programs for map and reduce are stored.
 The 'mr' directory contains the implementation code for MapReduce. <br>
