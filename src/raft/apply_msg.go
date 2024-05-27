@@ -72,30 +72,6 @@ func (rf *Raft) apply() {
 	rf.Unlock()
 	// this for , do not exec hold lock, it come to dead lock, beacase, applychan is full, and then can not release lock.
 	for _, msg := range needApplyMsg {
-		//rf.Lock()
-		//if msg.CommandIndex != rf.LastApplied+1 {
-		//	rf.Unlock()
-		//	continue
-		//}
-		//rf.Unlock()
-		//// logger.Infof("[S%v], send cmd: %v", me, GetPrintMsg([]ApplyMsg{msg}))
-		//rf.applyChan <- msg
-		//rf.Lock()
-		//if msg.CommandIndex != rf.LastApplied+1 {
-		//	rf.Unlock()
-		//	continue
-		//}
-		//rf.LastApplied = msg.CommandIndex
-		//rf.Unlock()
-
-		//rf.Lock()
-		//if msg.CommandIndex != rf.LastApplied+1 {
-		//	rf.Unlock()
-		//	continue
-		//}
-		//rf.applyChan <- msg
-		//rf.LastApplied = msg.CommandIndex
-		//rf.Unlock()
 		rf.applyChan <- msg
 	}
 }

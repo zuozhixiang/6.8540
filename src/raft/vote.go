@@ -67,7 +67,7 @@ func (rf *Raft) RequestVote(req *RequestVoteArgs, resp *RequestVoteReply) {
 	if rf.VotedFor == NoneVote || rf.VotedFor == req.CandidateID {
 		lastIndex := rf.Logs.GetLastIndex()
 		lastTerm := rf.Logs.GetLastTerm()
-		// 要求， 候选人的日志比自己的新， 要么任期 比我大， 要么任期相同，小于比我大
+		// candiate'log must be newer than me,  term < candidate's term or term equal to candidate's term， then compare log index
 		if lastTerm < req.LastLogTerm || (lastTerm == req.LastLogTerm && lastIndex <= req.LastLogIndex) {
 			rf.debugf(ReciveVote, "Candidate[S%v]-> S[%v] success req: %v", req.CandidateID, rf.me, toJson(req))
 			resp.VoteGranted = true
