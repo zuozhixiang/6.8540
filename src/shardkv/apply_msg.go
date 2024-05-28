@@ -30,79 +30,27 @@ func (kv *ShardKV) executeOp(op Op, shard int) string {
 		}
 	case SyncConfigType:
 		{
-			debugf(Method("SyncConfig"), kv.me, kv.gid, "Op: %v state: %v", toJson(op), toJson(kv))
-			oldConfig := kv.ShardConfig
-			kv.ShardConfig = op.Config
-			kv.Shards = getSelfShards(op.Config.Shards, kv.gid) // all shards need
-			add := op.NeedAddShards                             // need to add
-			remove := op.NeedRemoveShards                       // need to remove
-
-			// update hold shards
+			// need to do
+			newConfig := &op.Config
+			if newConfig.Num == kv.ShardConfig.Num {
+				debugf(Method("SyncConfigType"), kv.me, kv.gid, "get old config: %v, self: %v", toJson(newConfig), toJson(kv.ShardConfig))
+				return ""
+			}
+			// calaculate change config
+			oldConfig := &kv.ShardConfig
+			add, remove := getAddAndRemove(oldConfig.Shards, newConfig.Shards, kv.gid)
 			for _, shard := range add {
-				if oldConfig.Shards[shard] == 0 {
-					kv.HoldShards[shard] = true
-				}
+				kv.AllShardState[shard] = Pulling
+				delete(kv.HoldNormalShards, shard)
 			}
-
-			// need to send shard to other group
-			needSend := []int{}
 			for _, shard := range remove {
-				if kv.HoldShards[shard] {
-					needSend = append(needSend, shard)
-					kv.HoldShards[shard] = false
-				}
+				kv.AllShardState[shard] = Pushing
+				delete(kv.HoldNormalShards, shard)
 			}
-
-			if kv.isLeader() && len(needSend) > 0 {
-				for _, shard := range needSend {
-					kv.SendShard(shard, op.Config.Shards[shard])
-				}
-			}
-
-			for _, shard := range add {
-				//  need to wait new add shards come
-				if !kv.HoldShards[shard] {
-					kv.NoReadyShardSet[shard] = true
-				}
-			}
-			// remove, shard Data
-			for _, shard := range remove {
-				kv.Data[shard] = map[string]string{}
-				kv.VersionData[shard] = map[int64]string{}
-				kv.Executed[shard] = map[int64]bool{}
-			}
-			debugf(Method("SyncConfig"), kv.me, kv.gid, "sync Config success, %v,hold: %v, noready: %v,state: %v, ", toJson(kv.ShardConfig), toJson(kv.HoldShards), toJson(kv.NoReadyShardSet), toJson(kv.Data))
-			return ""
 		}
 	case GetShardType:
 		{
-			debugf(GetShard, kv.me, kv.gid, "Op: %v", toJson(op))
-			if kv.MoveExecuted[op.ID] {
-				panic(op.ID)
-			}
-			if kv.ShardConfig.Num > op.Config.Num {
-				//debugf(GetShard, kv.me, kv.gid, "id: %v, update config", op.ID)
-				//kv.ShardConfig = op.Config
-				panic("123")
-			} else if kv.ShardConfig.Num < op.Config.Num {
-				debugf(GetShard, kv.me, kv.gid, "id: %v, old config", op.ID)
-				return ""
-			}
-			kv.MoveExecuted[op.ID] = true
-			//if kv.HoldShards[shard] {
-			//	errMsg := fmt.Sprintf("[G%v][S%v] ID:%v aleady hold shard: %v", kv.gid, kv.me, op.ID, shard)
-			//	debugf(GetShard, kv.me, kv.gid, "ID:%v, state: %v", op.ID, toJson(kv))
-			//	panic(errMsg)
-			//}
 
-			shardData := op.ShardData
-			kv.Data[shard] = shardData.Data
-			kv.Executed[shard] = shardData.Executed
-			kv.VersionData[shard] = shardData.VersionData
-			delete(kv.NoReadyShardSet, shard)
-			kv.HoldShards[shard] = true
-			debugf(GetShard, kv.me, kv.gid, "get shard: %v, id:%v, NoReady:%v, holdShard:%v, state: %v", shard, op.ID, toJson(kv.NoReadyShardSet), toJson(kv.HoldShards), toJson(kv.Data))
-			return ""
 		}
 	case DeleteType:
 		{
@@ -153,10 +101,7 @@ func (kv *ShardKV) applyMsgForStateMachine() {
 				shard := key2shard(op.Key)
 
 				if op.Type == GetShardType {
-					if kv.MoveExecuted[op.ID] {
-						continue
-					}
-					shard = op.ShardData.Shard
+
 				} else if op.Type != SyncConfigType && (!kv.checkShard(shard) || kv.checkExecuted(op.ID, shard)) {
 					continue
 				}

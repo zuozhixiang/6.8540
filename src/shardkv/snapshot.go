@@ -38,19 +38,13 @@ func (kv *ShardKV) dumpData() []byte {
 	if err = d.Encode(kv.VersionData); err != nil {
 		panic(err)
 	}
-	if err = d.Encode(kv.MoveExecuted); err != nil {
-		panic(err)
-	}
 	if err = d.Encode(kv.ShardConfig); err != nil {
 		panic(err)
 	}
-	if err = d.Encode(kv.NoReadyShardSet); err != nil {
+	if err = d.Encode(kv.AllShardState); err != nil {
 		panic(err)
 	}
-	if err = d.Encode(kv.HoldShards); err != nil {
-		panic(err)
-	}
-	if err = d.Encode(kv.Shards); err != nil {
+	if err = d.Encode(kv.HoldNormalShards); err != nil {
 		panic(err)
 	}
 	if err = d.Encode(kv.lastAppliedIndex); err != nil {
@@ -69,7 +63,6 @@ func (kv *ShardKV) applySnapshot(data []byte) {
 	var newState [shardctrler.NShards]map[string]string
 	var executed [shardctrler.NShards]map[int64]bool
 	var versionData [shardctrler.NShards]map[int64]string
-	var moveExecuted map[int64]bool
 	var lastApplied int
 
 	if err := d.Decode(&newState); err != nil {
@@ -87,40 +80,29 @@ func (kv *ShardKV) applySnapshot(data []byte) {
 	} else {
 		kv.VersionData = versionData
 	}
-	if err := d.Decode(&moveExecuted); err != nil {
-		panic(err)
-	} else {
-		kv.MoveExecuted = moveExecuted
-	}
 
 	var ShardConfig shardctrler.Config
-	var shards map[int]bool
-	var NoReadyShardSet map[int]bool
-	var HoldShards [shardctrler.NShards]bool
+	var AllShardState [shardctrler.NShards]ShardState
+	var HoldNormalShards map[int]bool
 	if err := d.Decode(&ShardConfig); err != nil {
 		panic(err)
 	} else {
 		kv.ShardConfig = ShardConfig
 	}
-	if err := d.Decode(&NoReadyShardSet); err != nil {
+	if err := d.Decode(&AllShardState); err != nil {
 		panic(err)
 	} else {
-		kv.NoReadyShardSet = NoReadyShardSet
+		kv.AllShardState = AllShardState
 	}
-	if err := d.Decode(&HoldShards); err != nil {
+	if err := d.Decode(&HoldNormalShards); err != nil {
 		panic(err)
 	} else {
-		kv.HoldShards = HoldShards
+		kv.HoldNormalShards = HoldNormalShards
 	}
-	if err := d.Decode(&shards); err != nil {
-		panic(err)
-	} else {
-		kv.Shards = shards
-	}
+
 	if err := d.Decode(&lastApplied); err != nil {
 		panic(err)
 	} else {
 		kv.lastAppliedIndex = lastApplied
 	}
-
 }

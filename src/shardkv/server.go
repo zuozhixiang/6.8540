@@ -24,9 +24,10 @@ const (
 type ShardState int
 
 const (
-	Normal ShardState = iota
-	NoReady
-	NoSelf
+	NoSelf ShardState = iota
+	Serving
+	Pulling
+	Pushing
 )
 
 type ShardData struct {
@@ -63,17 +64,13 @@ type ShardKV struct {
 	Executed    [shardctrler.NShards]map[int64]bool
 	VersionData [shardctrler.NShards]map[int64]string
 
-	// move shard dupucated check
-	MoveExecuted map[int64]bool
-
 	lastAppliedIndex int
 	cond             *sync.Cond
 	persiter         *raft.Persister
 	mck              *shardctrler.Clerk
 	ShardConfig      shardctrler.Config
-	Shards           map[int]bool
-	NoReadyShardSet  map[int]bool
-	HoldShards       [shardctrler.NShards]bool
+	HoldNormalShards map[int]bool // now hold on serving shards
+	AllShardState    [shardctrler.NShards]ShardState
 }
 
 func (kv *ShardKV) lock() {
@@ -90,7 +87,7 @@ func (kv *ShardKV) isLeader() bool {
 }
 
 func (kv *ShardKV) checkShard(shard int) bool {
-	_, ok := kv.Shards[shard]
+	_, ok := kv.HoldNormalShards[shard]
 	return ok
 }
 
@@ -114,16 +111,18 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 	kv.lock()
 	defer kv.unlock()
 	shard := key2shard(req.Key)
-	if !kv.checkShard(shard) {
+	shardState := kv.AllShardState[shard]
+	if shardState == NoSelf || shardState == Pushing {
 		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group", req.ID, shard)
+		debugf(m, kv.me, kv.gid, "id: %v, wrong leader", req.ID)
 		return
 	}
-	if _, ok := kv.NoReadyShardSet[shard]; ok {
+	if shardState == Pulling {
 		resp.Err = ErrShardNoReady
-		debugf(m, kv.me, kv.gid, "id: %v, shard not ready: %v", req.ID, shard)
+		debugf(m, kv.me, kv.gid, "id: %v, shard wait pull", req.ID)
 		return
 	}
+
 	resp.Err = OK
 	if kv.checkExecuted(req.ID, shard) {
 		if _, ok := kv.VersionData[shard][req.ID]; !ok {
@@ -161,7 +160,7 @@ func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
 	}
 	if !kv.checkShard(shard) {
 		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.Shards))
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.HoldNormalShards))
 		return
 	}
 	if !kv.isLeader() {
@@ -202,17 +201,16 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 	}
 	kv.lock()
 	defer kv.unlock()
-
 	shard := key2shard(req.Key)
-
-	if !kv.checkShard(shard) {
+	shardState := kv.AllShardState[shard]
+	if shardState == NoSelf || shardState == Pushing {
 		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv))
+		debugf(m, kv.me, kv.gid, "id: %v, wrong leader", req.ID)
 		return
 	}
-	if _, ok := kv.NoReadyShardSet[shard]; ok {
+	if shardState == Pulling {
 		resp.Err = ErrShardNoReady
-		debugf(m, kv.me, kv.gid, "id: %v, shard not ready: %v, noready: %v", req.ID, shard, toJson(kv.NoReadyShardSet))
+		debugf(m, kv.me, kv.gid, "id: %v, shard wait pull", req.ID)
 		return
 	}
 	resp.Err = OK
@@ -251,7 +249,7 @@ func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
 	}
 	if !kv.checkShard(shard) {
 		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.Shards))
+		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.HoldNormalShards))
 		return
 	}
 	if !kv.isLeader() {
@@ -311,6 +309,7 @@ func (kv *ShardKV) killed() bool {
 //
 // StartServer() must return quickly, so it should start goroutines
 // for any long-running work.
+
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
@@ -333,13 +332,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 		kv.Executed[i] = map[int64]bool{}
 		kv.VersionData[i] = map[int64]string{}
 	}
-	kv.MoveExecuted = map[int64]bool{}
 	kv.lastAppliedIndex = 0
 	kv.cond = sync.NewCond(&kv.mu)
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
 	kv.persiter = persister
-	kv.NoReadyShardSet = map[int]bool{}
-	kv.HoldShards = [10]bool{}
+	kv.ClearShardState()
+	kv.HoldNormalShards = map[int]bool{}
 	kv.applySnapshot(persister.ReadSnapshot())
 
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
@@ -349,4 +347,10 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	go kv.UpdateConfig()
 	logger.Infof("start [G%v][S%v], state: %v", gid, kv.me, toJson(kv))
 	return kv
+}
+
+func (kv *ShardKV) ClearShardState() {
+	for i := 0; i < len(kv.AllShardState); i++ {
+		kv.AllShardState[i] = NoSelf
+	}
 }
