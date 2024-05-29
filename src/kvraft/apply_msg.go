@@ -46,7 +46,6 @@ func formatCmd(op Op) string {
 }
 
 func (kv *KVServer) applyMsgForStateMachine() {
-
 	for {
 		if kv.killed() {
 			return
@@ -73,6 +72,14 @@ func (kv *KVServer) applyMsgForStateMachine() {
 				res := kv.executeOp(op)
 				op.Value = res
 				debugf(Apply, kv.me, "idx: %v, %v", msg.CommandIndex, formatCmd(op))
+
+				if kv.maxraftstate != -1 && kv.persiter.RaftStateSize() >= kv.maxraftstate {
+					dumps := kv.dumpData()
+					kv.unlock()
+					kv.rf.Snapshot(kv.lastAppliedIndex, dumps)
+					kv.lock()
+					debugf(MakeSnap, kv.me, "%v > %v, lastApplied: %v, newsize: %v", size, kv.maxraftstate, kv.lastAppliedIndex, kv.persiter.RaftStateSize())
+				}
 			} else {
 				if msg.SnapshotIndex <= lastApplied {
 					errmsg := fmt.Sprintf("[S%v], snapshot index: %v, lastApplied: %v, msg: %v", kv.me, msg.SnapshotIndex, lastApplied, raft.GetPrintMsg([]raft.ApplyMsg{msg}))

@@ -349,6 +349,5 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.applyMsgForStateMachine()
-	go kv.dectionMaxSize()
 	return kv
 }
