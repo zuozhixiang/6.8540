@@ -35,8 +35,9 @@ func (kv *KVServer) executeOp(op *Op) (res Result) {
 		}
 	case DeleteType:
 		{
-			//delete(kv.executed, op.Key)
-			//delete(kv.versionData, op.Key)
+			req := op.Data.(*NotifyFinishedRequest)
+			delete(kv.executed, req.ID)
+			delete(kv.versionData, op.ID)
 		}
 	default:
 		panic("illegal type")
@@ -52,13 +53,6 @@ var opmap = map[OpType]Method{
 }
 
 func (kv *KVServer) applyMsgForStateMachine() {
-	//msg := <-kv.applyCh
-	//needApplyMsg := []raft.ApplyMsg{msg}
-	//size := len(kv.applyCh)
-	//for i := 0; i < size; i++ {
-	//	needApplyMsg = append(needApplyMsg, <-kv.applyCh)
-	//}
-
 	for msg := range kv.applyCh {
 		kv.lock()
 		lastApplied := kv.lastAppliedIndex
@@ -74,15 +68,10 @@ func (kv *KVServer) applyMsgForStateMachine() {
 			kv.lastAppliedIndex = lastApplied
 			if kv.isLeader() {
 				ch, ok := kv.done[lastApplied]
-				kv.unlock()
 				if ok {
 					*ch <- res
 				}
-			} else {
-				kv.unlock()
 			}
-
-			kv.lock()
 			size := kv.persiter.RaftStateSize()
 			if kv.maxraftstate != -1 && size >= kv.maxraftstate {
 				dumps := kv.dumpData()
@@ -103,8 +92,4 @@ func (kv *KVServer) applyMsgForStateMachine() {
 		}
 
 	}
-	//if len(kv.applyCh) == 0 {
-	//	time.Sleep(10 * time.Millisecond)
-	//}
-
 }

@@ -125,7 +125,6 @@ func (ck *Clerk) Append(key string, value string) {
 }
 
 func (ck *Clerk) Notify(ID int64) {
-	return
 	rpcname := "KVServer." + "Notify"
 	m := SendNotify
 	req := &NotifyFinishedRequest{

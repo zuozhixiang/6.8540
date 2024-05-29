@@ -45,14 +45,14 @@ func (kv *KVServer) lock() {
 	//_, file, line, _ := runtime.Caller(1)
 	//pos := fmt.Sprintf("%v:%v", file[Len:], line)
 
-	//debugf(Method("lock"), kv.me, "加锁: pos: %v", pos)
+	//debugf(Method("lock"), kv.me, "lock: pos: %v", pos)
 	kv.mu.Lock()
 }
 
 func (kv *KVServer) unlock() {
 	//_, file, line, _ := runtime.Caller(1)
 	//pos := fmt.Sprintf("%v:%v", file[Len:], line)
-	//debugf(Method("unlock"), kv.me, "解锁: pos: %v", pos)
+	//debugf(Method("unlock"), kv.me, "lock: pos: %v", pos)
 	kv.mu.Unlock()
 }
 
@@ -174,7 +174,13 @@ func (kv *KVServer) Notify(req *NotifyFinishedRequest, resp *NotifyFinishedRespo
 		resp.Err = ErrWrongLeader
 		return
 	}
-
+	op := Op{
+		ID:   req.ID,
+		Data: req,
+		Type: DeleteType,
+	}
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -214,6 +220,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	labgob.Register(Op{})
 	labgob.Register(&PutAppendArgs{})
 	labgob.Register(&GetArgs{})
+	labgob.Register(&NotifyFinishedRequest{})
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
