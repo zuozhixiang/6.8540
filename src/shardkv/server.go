@@ -18,7 +18,8 @@ const (
 	PutType
 	DeleteType
 	SyncConfigType
-	GetShardType
+	MoveShardType
+	MoveDone
 )
 
 type ShardState int
@@ -345,6 +346,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	go kv.applyMsgForStateMachine()
 	go kv.dectionMaxSize()
 	go kv.UpdateConfig()
+	go kv.checkAndSendShard()
 	logger.Infof("start [G%v][S%v], state: %v", gid, kv.me, toJson(kv))
 	return kv
 }

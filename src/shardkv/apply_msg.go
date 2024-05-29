@@ -36,9 +36,19 @@ func (kv *ShardKV) executeOp(op Op, shard int) string {
 				debugf(Method("SyncConfigType"), kv.me, kv.gid, "get old config: %v, self: %v", toJson(newConfig), toJson(kv.ShardConfig))
 				return ""
 			}
-			// calaculate change config
 			oldConfig := &kv.ShardConfig
 			add, remove := getAddAndRemove(oldConfig.Shards, newConfig.Shards, kv.gid)
+			if newConfig.Num == 1 {
+				if len(remove) > 0 {
+					panic("not empty")
+				}
+				for _, shard := range add {
+					kv.AllShardState[shard] = Serving
+					kv.HoldNormalShards[shard] = true
+				}
+				return ""
+			}
+			// calaculate change config
 			for _, shard := range add {
 				kv.AllShardState[shard] = Pulling
 				delete(kv.HoldNormalShards, shard)
@@ -47,10 +57,34 @@ func (kv *ShardKV) executeOp(op Op, shard int) string {
 				kv.AllShardState[shard] = Pushing
 				delete(kv.HoldNormalShards, shard)
 			}
-		}
-	case GetShardType:
-		{
 
+		}
+	case MoveShardType:
+		{
+			shardData := op.ShardData
+			if op.Config.Num < kv.ShardConfig.Num {
+				panic("old")
+			}
+			if op.Config.Num > kv.ShardConfig.Num {
+				panic("new")
+			}
+			shard := shardData.Shard
+			if kv.AllShardState[shard] == Serving {
+				debugf(Method("ApplyShard"), kv.me, kv.gid, "repeat ")
+				return ""
+			}
+			if kv.AllShardState[shard] != Pulling {
+				panic("illegal state")
+			}
+
+		}
+	case MoveDone:
+		{
+			shardData := op.ShardData
+			kv.AllShardState[shard] = Serving
+			kv.Data[shard] = shardData.Data
+			kv.Executed[shard] = shardData.Executed
+			kv.VersionData[shard] = shardData.VersionData
 		}
 	case DeleteType:
 		{
@@ -70,7 +104,6 @@ var opmap = map[OpType]string{
 	AppendType:     string(AppendMethod),
 	SyncConfigType: "SyncConfig",
 	DeleteType:     "Delete",
-	GetShardType:   "GetShard",
 }
 
 func formatCmd(op Op) string {
@@ -79,9 +112,6 @@ func formatCmd(op Op) string {
 
 func (kv *ShardKV) applyMsgForStateMachine() {
 	for {
-		if kv.killed() {
-			return
-		}
 		msg := <-kv.applyCh
 		needApplyMsg := []raft.ApplyMsg{msg}
 		size := len(kv.applyCh)
@@ -100,7 +130,7 @@ func (kv *ShardKV) applyMsgForStateMachine() {
 				op := msg.Command.(Op)
 				shard := key2shard(op.Key)
 
-				if op.Type == GetShardType {
+				if op.Type == MoveShardType {
 
 				} else if op.Type != SyncConfigType && (!kv.checkShard(shard) || kv.checkExecuted(op.ID, shard)) {
 					continue

@@ -4,7 +4,6 @@ import (
 	"6.5840/shardctrler"
 	"fmt"
 	"runtime"
-	"sync"
 	"time"
 )
 
@@ -33,37 +32,6 @@ func getAddAndRemove(oldShards [shardctrler.NShards]int, newShards [shardctrler.
 		}
 	}
 	return add, remove
-}
-
-func (kv *ShardKV) sendShard(me int, fromgid int, togid int, req *MoveShardArgs, groups []string, wg *sync.WaitGroup) {
-	resp := &MoveShardReply{}
-	defer debugf(SendShard, me, fromgid, "->[g%v] success, req:%v", togid, toJson(req))
-	defer wg.Done()
-	for kv.isLeader() && !kv.killed() {
-		for i := 0; i < len(groups); i++ {
-			srvname := groups[i]
-			srv := kv.make_end(srvname)
-			debugf(SendShard, me, fromgid, "->[g%v]%v, req: %v", togid, srvname, toJson(req))
-			ok := srv.Call("ShardKV.MoveShard", req, resp)
-			if ok && resp.Err == OK {
-				debugf(SendShard, me, fromgid, "success ->[g%v]%v, id:%v req: %v", togid, srvname, req.ID, toJson(req))
-				return
-			} else if ok && resp.Err == ErrWrongGroup {
-				debugf(SendShard, me, fromgid, "fatal fail wrong group  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
-				panic(resp.Err)
-			} else if ok && resp.Err == ErrWrongLeader {
-				debugf(SendShard, me, fromgid, "fail wrong leader  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
-			} else if ok && resp.Err == ErrOldVersion {
-				// debugf(SendShard, me, fromgid, "fatal fail old config  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
-				msg := "old config" + toJson(req)
-				panic(msg)
-			} else if ok && resp.Err == ErrWaiting {
-				debugf(SendShard, me, fromgid, "id: %v, need to wait", req.ID)
-				time.Sleep(10 * time.Millisecond)
-				i--
-			}
-		}
-	}
 }
 
 func (kv *ShardKV) updateConfigHelper(lastConfig shardctrler.Config, ID int64) {
