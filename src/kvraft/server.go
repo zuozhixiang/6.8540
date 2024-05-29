@@ -6,6 +6,7 @@ import (
 	"6.5840/raft"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type OpType int
@@ -18,10 +19,9 @@ const (
 )
 
 type Op struct {
-	ID    string
-	Type  OpType
-	Key   string
-	Value string
+	ID   int64
+	Type OpType
+	Data any
 }
 
 type KVServer struct {
@@ -34,18 +34,25 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	data             map[string]string // state machine data
-	executed         map[string]bool   // executed requestId
-	versionData      map[string]string // requestID to data
+	executed         map[int64]bool    // executed requestId
+	versionData      map[int64]string  // requestID to data
 	lastAppliedIndex int
-	cond             *sync.Cond      // condition variale
 	persiter         *raft.Persister // persist util
+	done             map[int]*chan Result
 }
 
 func (kv *KVServer) lock() {
+	//_, file, line, _ := runtime.Caller(1)
+	//pos := fmt.Sprintf("%v:%v", file[Len:], line)
+
+	//debugf(Method("lock"), kv.me, "加锁: pos: %v", pos)
 	kv.mu.Lock()
 }
 
 func (kv *KVServer) unlock() {
+	//_, file, line, _ := runtime.Caller(1)
+	//pos := fmt.Sprintf("%v:%v", file[Len:], line)
+	//debugf(Method("unlock"), kv.me, "解锁: pos: %v", pos)
 	kv.mu.Unlock()
 }
 
@@ -54,20 +61,35 @@ func (kv *KVServer) isLeader() bool {
 	return ret
 }
 
-func (kv *KVServer) checkExecuted(id string) bool {
+func (kv *KVServer) checkExecuted(id int64) bool {
 	if _, ok := kv.executed[id]; ok {
 		return true
 	}
 	return false
 }
 
-func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
-	if kv.killed() {
-		return
+func (kv *KVServer) StartAndWaitRes(op Op) (res Result) {
+	ch := make(chan Result, 1)
+	kv.lock()
+	index, _, _ := kv.rf.Start(op)
+	kv.done[index] = &ch
+	kv.unlock()
+	res.Err = OK
+	select {
+	case r := <-ch:
+		{
+			res = r
+		}
+	case <-time.After(700 * time.Millisecond):
+		res.Err = ErrTimeout
 	}
 	kv.lock()
-	defer kv.unlock()
+	delete(kv.done, index)
+	kv.unlock()
+	return
+}
 
+func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 	m := GetMethod
 	if !kv.isLeader() {
 		debugf(m, kv.me, "not leader, req: %v", toJson(req))
@@ -75,227 +97,84 @@ func (kv *KVServer) Get(req *GetArgs, resp *GetReply) {
 		return
 	}
 	resp.Err = OK
-	if kv.checkExecuted(req.ID) {
-		if _, ok := kv.versionData[req.ID]; !ok {
-			panic(req.ID)
-		}
-		resp.Value = kv.versionData[req.ID]
-		debugf(m, kv.me, "Executed, id: %v", req.ID)
-		return
-	}
 
 	op := Op{
 		ID:   req.ID,
-		Key:  req.Key,
+		Data: req,
 		Type: GetType,
 	}
-
-	index, term, isLeader := kv.rf.Start(op)
-	if !isLeader {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
+	resp.Value = res.Value
+	if resp.Err == OK {
+		debugf(m, kv.me, "success req: %v, value: %v", toJson(req), resp.Value)
+	} else {
+		debugf(m, kv.me, "fail req: %v, resp: %v ", toJson(req), toJson(resp))
 	}
-	debugf(m, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
-
-	timeoutChan := make(chan bool, 1)
-	go startTimeout(kv.cond, timeoutChan)
-	timeout := false
-	for !(index <= kv.lastAppliedIndex) && !timeout {
-		select {
-		case <-timeoutChan:
-			timeout = true
-		default:
-			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
-		}
-	}
-	if !kv.isLeader() {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
-	}
-	if timeout {
-		resp.Err = ErrTimeout
-		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
-		return
-	}
-	if _, ok := kv.versionData[op.ID]; !ok {
-		panic("empty")
-	}
-	res := kv.versionData[op.ID]
-	if res == "" {
-		debugf(m, kv.me, "warning, req:%v", toJson(req))
-	}
-	debugf(m, kv.me, "success, req: %v, value: %v", toJson(req), res)
-	resp.Value = res
 }
 
 func (kv *KVServer) Put(req *PutAppendArgs, resp *PutAppendReply) {
-	// Your code here.
-	if kv.killed() {
-		return
-	}
-	kv.lock()
-	defer kv.unlock()
 	m := PutMethod
 	if !kv.isLeader() {
 		debugf(m, kv.me, "not leader, req: %v", toJson(req))
 		resp.Err = ErrWrongLeader
 		return
 	}
-
 	resp.Err = OK
-	if kv.checkExecuted(req.ID) {
-		debugf(m, kv.me, "Executed, id: %v", toJson(req))
+	kv.lock()
+	if kv.executed[req.ID] {
+		kv.unlock()
 		return
 	}
-
+	kv.unlock()
 	op := Op{
-		ID:    req.ID,
-		Type:  PutType,
-		Key:   req.Key,
-		Value: req.Value,
+		ID:   req.ID,
+		Data: req,
+		Type: PutType,
 	}
-	debugf(m, kv.me, "start, id: %v", req.ID)
-	index, term, isLeader := kv.rf.Start(op)
-	if !isLeader {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
+	if resp.Err == OK {
+		debugf(m, kv.me, "success req: %v", toJson(req))
+	} else {
+		debugf(m, kv.me, "fail req: %v, resp: %v ", toJson(req), toJson(resp))
 	}
-	debugf(m, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
-	timeoutChan := make(chan bool, 1)
-	go startTimeout(kv.cond, timeoutChan)
-	timeout := false
-	for !(index <= kv.lastAppliedIndex) && !timeout {
-		select {
-		case <-timeoutChan:
-			timeout = true // timeout notify, raft can not do a agreement
-		default:
-			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
-		}
-	}
-	if !kv.isLeader() {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
-	}
-	if timeout {
-		resp.Err = ErrTimeout
-		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
-		return
-	}
-	debugf(m, kv.me, "success, req:%v", toJson(req))
 }
 
 func (kv *KVServer) Append(req *PutAppendArgs, resp *PutAppendReply) {
-	if kv.killed() {
-		return
-	}
-	kv.lock()
-	defer kv.unlock()
-	meth := AppendMethod
+	m := AppendMethod
 	if !kv.isLeader() {
-		debugf(meth, kv.me, "not leader, req: %v", toJson(req))
+		debugf(m, kv.me, "not leader, req: %v", toJson(req))
 		resp.Err = ErrWrongLeader
 		return
 	}
 	resp.Err = OK
-	if kv.checkExecuted(req.ID) {
-		debugf(meth, kv.me, "Executed, id: %v", req.ID)
+	kv.lock()
+	if kv.executed[req.ID] {
+		kv.unlock()
 		return
 	}
-
-	debugf(meth, kv.me, "arrive req: %v", toJson(req))
+	kv.unlock()
 	op := Op{
-		ID:    req.ID,
-		Type:  AppendType,
-		Key:   req.Key,
-		Value: req.Value,
+		ID:   req.ID,
+		Data: req,
+		Type: AppendType,
 	}
-	debugf(meth, kv.me, "start id: %v", req.ID)
-	index, term, isLeader := kv.rf.Start(op)
-	if !isLeader {
-		debugf(meth, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
+	if resp.Err == OK {
+		debugf(m, kv.me, "success req: %v", toJson(req))
+	} else {
+		debugf(m, kv.me, "fail req: %v, resp: %v ", toJson(req), toJson(resp))
 	}
-	debugf(meth, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
-
-	timeoutChan := make(chan bool, 1)
-	go startTimeout(kv.cond, timeoutChan) // boot a goroutine to finish timeout signal
-	timeout := false
-	for !(index <= kv.lastAppliedIndex) && !timeout {
-		select {
-		case <-timeoutChan:
-			timeout = true // timeout notify, raft can not do a agreement
-			debugf(meth, kv.me, "timeout!, req: %v", toJson(req))
-		default:
-			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
-		}
-	}
-	if !kv.isLeader() {
-		debugf(meth, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
-	}
-	if timeout {
-		resp.Err = ErrTimeout
-		debugf(meth, kv.me, "timeout!, req: %v", toJson(req))
-		return
-	}
-	debugf(meth, kv.me, "success, req: %v", toJson(req))
-	return
 }
 
 func (kv *KVServer) Notify(req *NotifyFinishedRequest, resp *NotifyFinishedResponse) {
-	if kv.killed() {
-		return
-	}
-	kv.lock()
-	defer kv.unlock()
-	m := Notify
 	if !kv.isLeader() {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
 		resp.Err = ErrWrongLeader
 		return
 	}
-	resp.Err = OK
 
-	op := Op{
-		Type: DeleteType,
-		Key:  req.ID,
-	}
-	debugf(m, kv.me, "start delete: %v", req.ID)
-	index, term, isLeader := kv.rf.Start(op)
-	if !isLeader {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
-	}
-	debugf(m, kv.me, "req: %v, index: %v, term:%v", toJson(req), index, term)
-	timeoutChan := make(chan bool, 1)
-	go startTimeout(kv.cond, timeoutChan)
-	timeout := false
-	for !(index <= kv.lastAppliedIndex) && !timeout {
-		select {
-		case <-timeoutChan:
-			timeout = true // timeout notify, raft can not do a agreement
-		default:
-			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
-		}
-	}
-	if !kv.isLeader() {
-		debugf(m, kv.me, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
-	}
-	if timeout {
-		resp.Err = ErrTimeout
-		debugf(m, kv.me, "timeout!, req: %v", toJson(req))
-		return
-	}
-	debugf(m, kv.me, "success, req:%v", toJson(req))
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -333,18 +212,20 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
+	labgob.Register(&PutAppendArgs{})
+	labgob.Register(&GetArgs{})
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 
 	kv.data = map[string]string{}
-	kv.versionData = map[string]string{}
-	kv.executed = map[string]bool{}
-	kv.applyCh = make(chan raft.ApplyMsg, 100)
+	kv.versionData = map[int64]string{}
+	kv.executed = map[int64]bool{}
+	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.persiter = persister
 	kv.lastAppliedIndex = 0
+	kv.done = make(map[int]*chan Result, 100)
 	kv.applySnapshot(persister.ReadSnapshot())
-	kv.cond = sync.NewCond(&kv.mu)
 	debugf(Start, kv.me, "data: %v, executed: %v, versionData:%v", toJson(kv.data), toJson(kv.executed), toJson(kv.versionData))
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 

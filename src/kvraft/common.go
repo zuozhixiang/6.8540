@@ -7,21 +7,19 @@ const (
 	ErrTimeout     = "ErrTimeout"
 )
 
-type Err string
-
 // Put or Append
 type PutAppendArgs struct {
-	ID    string
+	ID    int64
 	Key   string
 	Value string
 }
 
 type PutAppendReply struct {
-	Err Err
+	Err string
 }
 
 type GetArgs struct {
-	ID  string
+	ID  int64
 	Key string
 }
 
@@ -31,9 +29,14 @@ type GetReply struct {
 }
 
 type NotifyFinishedRequest struct {
-	ID string
+	ID int64
 }
 
 type NotifyFinishedResponse struct {
 	Err string
+}
+
+type Result struct {
+	Err   string
+	Value string
 }

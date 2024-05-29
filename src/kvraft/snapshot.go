@@ -29,8 +29,8 @@ func (kv *KVServer) applySnapshot(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var newState map[string]string
-	var executed map[string]bool
-	var versionData map[string]string
+	var executed map[int64]bool
+	var versionData map[int64]string
 	if err := d.Decode(&newState); err != nil {
 		panic(err)
 	} else {

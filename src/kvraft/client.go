@@ -2,7 +2,6 @@ package kvraft
 
 import (
 	"6.5840/labrpc"
-	"fmt"
 	"sync/atomic"
 	"time"
 )
@@ -14,10 +13,8 @@ type Clerk struct {
 	GenRequestID atomic.Int64
 }
 
-func (ck *Clerk) getNextRequestID() string {
-	id := ck.GenRequestID.Load()
-	ck.GenRequestID.Add(1)
-	return fmt.Sprintf("%v-%v", ck.ClientID, id)
+func (ck *Clerk) getNextRequestID() int64 {
+	return nrand()
 }
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
@@ -127,7 +124,8 @@ func (ck *Clerk) Append(key string, value string) {
 	ck.PutAppend(key, value, "Append")
 }
 
-func (ck *Clerk) Notify(ID string) {
+func (ck *Clerk) Notify(ID int64) {
+	return
 	rpcname := "KVServer." + "Notify"
 	m := SendNotify
 	req := &NotifyFinishedRequest{
