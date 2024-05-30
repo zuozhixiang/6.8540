@@ -36,7 +36,7 @@ The following diagram demonstrates how Raft interacts with the upper-level appli
 ![img_7.png](imgs/img_7.png)
 
 ## Lab5 ShardKV
-sharded key/value store will have two main components. First,First, a set of replica groups. Each replica group is responsible for a subset of the shards, using Raft replication.
+sharded key/value store will have two main components. First, a set of replica groups. Each replica group is responsible for a subset of the shards, using Raft replication.
 The second component is the "shard controller". The shard controller decides which replica group should serve each shard;
 There is a single shard controller for the whole system, implemented as a fault-tolerant service using Raft. <br>
 The 'shardctrler' directory contains the implementation of the shard controller, while the 'shardkv' directory contains the implementation of the KV service
