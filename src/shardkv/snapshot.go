@@ -11,7 +11,8 @@ func (kv *ShardKV) dumpData() []byte {
 	d := labgob.NewEncoder(w)
 	var err error
 	if err = d.Encode(kv.ShardData); err != nil {
-		panic("decode fail")
+		logger.Error(toJson(kv.ShardData))
+		panic(err)
 	}
 	if err = d.Encode(kv.ShardConfig); err != nil {
 		panic(err)
@@ -35,9 +36,9 @@ func (kv *ShardKV) applySnapshot(data []byte) {
 	}
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
-	var shardData [shardctrler.NShards]*Shard
+	var shardData [shardctrler.NShards]Shard
 
-	if err := d.Decode(&data); err != nil {
+	if err := d.Decode(&shardData); err != nil {
 		panic(err)
 	} else {
 		kv.ShardData = shardData

@@ -2,6 +2,7 @@ package shardkv
 
 import (
 	"6.5840/shardctrler"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -19,14 +20,14 @@ func (kv *ShardKV) send() {
 		return
 	}
 	shardConfig := Copy(kv.ShardConfig).(shardctrler.Config)
-	shardData := Copy(kv.ShardData).([shardctrler.NShards]*Shard)
+	shardData := Copy(kv.ShardData).([shardctrler.NShards]Shard)
 	kv.unlock()
 	var wg sync.WaitGroup
 	for i := 0; i < len(kv.AllShardState); i++ {
 		if kv.AllShardState[i] == Pushing {
 			sendGID := shardConfig.Shards[i]
 			shard := i
-			kv.SendShard(shardConfig, *shardData[i], shard, sendGID, &wg)
+			kv.SendShard(shardConfig, shardData[i], shard, sendGID, &wg)
 		}
 	}
 	// debugf(Method("test"), kv.me, kv.gid, "block")
@@ -41,7 +42,7 @@ func (kv *ShardKV) SendShard(shardConfig shardctrler.Config, shard Shard, shardI
 	req := &MoveShardArgs{
 		ID:          nrand(),
 		ShardID:     shardID,
-		Data:        &shard,
+		Data:        shard,
 		ShardConfig: shardConfig,
 		FromGID:     kv.gid,
 		Me:          kv.me,
@@ -61,6 +62,12 @@ func (kv *ShardKV) sendShard(me int, fromgid int, togid int, req *MoveShardArgs,
 			ok := srv.Call("ShardKV.MoveShard", req, resp)
 			if ok && resp.Err == OK {
 				debugf(SendShard, me, fromgid, "success ->[g%v]%v, id:%v req: %v", togid, srvname, req.ID, toJson(req))
+				req := &MoveDoneArgs{
+					ID:      req.ID,
+					ShardID: req.ShardID,
+				}
+				resp := &MoveDoneReply{}
+				kv.MoveDone(req, resp)
 				return
 			} else if ok && resp.Err == ErrWrongGroup {
 				debugf(SendShard, me, fromgid, "fatal fail wrong group  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.ShardID)
@@ -69,8 +76,10 @@ func (kv *ShardKV) sendShard(me int, fromgid int, togid int, req *MoveShardArgs,
 				debugf(SendShard, me, fromgid, "fail wrong leader  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.ShardID)
 			} else if ok && resp.Err == ErrOldVersion {
 				// debugf(SendShard, me, fromgid, "fatal fail old config  ->[g%v]%v, id:%v, shard: %v", togid, srvname, req.ID, req.Shard)
-				msg := "old config" + toJson(req)
-				panic(msg)
+				kv.lock()
+				state := fmt.Sprintf("oldConfig: %v, state: %v", toJson(req), toJson(kv))
+				kv.unlock()
+				panic(state)
 			} else if ok && resp.Err == ErrWaiting {
 				debugf(SendShard, me, fromgid, "id: %v, need to wait", req.ID)
 				time.Sleep(100 * time.Millisecond)
@@ -87,25 +96,4 @@ func (kv *ShardKV) checkAndSendShard() {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-}
-
-func (kv *ShardKV) sendMoveDone(ID int64, groups []string, me int, shardID int) {
-	req := &MoveDoneArgs{ShardID: shardID, ID: ID}
-	resp := &MoveShardReply{}
-	for i := me; ; i++ {
-		i = i % len(groups)
-		srvname := groups[i]
-		srv := kv.make_end(srvname)
-		ok := srv.Call("ShardKV.MoveDone", req, resp)
-		debugf(MoveDoneM, kv.me, kv.gid, "req: %v", toJson(req))
-		if ok {
-			if resp.Err == OK {
-				break
-			}
-		}
-	}
-	kv.lock()
-	kv.HoldNormalShards[shardID] = true
-	kv.AllShardState[shardID] = Serving
-	kv.unlock()
 }

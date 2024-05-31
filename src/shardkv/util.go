@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const Debug = true
+const Debug = false
 
 var logger *zap.SugaredLogger
 
@@ -91,13 +91,13 @@ func debugf(meth Method, me int, gid int, format string, a ...interface{}) {
 	}
 }
 
-func NewShard() *Shard {
+func NewShard() Shard {
 	res := Shard{
 		Data:        map[string]string{},
-		Executed:    map[int64]bool{},
+		Executed:    map[int64]struct{}{},
 		VersionData: map[int64]string{},
 	}
-	return &res
+	return res
 }
 
 // Interface for delegating copy process to type

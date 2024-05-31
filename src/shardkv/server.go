@@ -56,7 +56,7 @@ type ShardKV struct {
 	// Your definitions here.
 	dead int32
 
-	ShardData [shardctrler.NShards]*Shard
+	ShardData [shardctrler.NShards]Shard
 
 	lastAppliedIndex int
 	persiter         *raft.Persister
@@ -166,7 +166,7 @@ func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
 	kv.lock()
 	newConfig := &req.ShardConfig
 	if newConfig.Num < kv.ShardConfig.Num {
-		resp.Err = ErrOldVersion
+		resp.Err = OK
 		debugf(m, kv.me, kv.gid, "err old verion, req: %v", req.ID)
 		kv.unlock()
 		return
@@ -215,6 +215,16 @@ func (kv *ShardKV) MoveDone(req *MoveDoneArgs, resp *MoveDoneReply) {
 	}
 }
 
+func (kv *ShardKV) CallDone(req *CallDoneArgs, resp *CallDoneReply) {
+	op := Op{
+		ID:   req.ID,
+		Type: DeleteType,
+		Data: req,
+	}
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
+}
+
 // the tester calls Kill() when a ShardKV instance won't
 // be needed again. you are not required to do anything
 // in Kill(), but it might be convenient to (for example)
@@ -222,9 +232,8 @@ func (kv *ShardKV) MoveDone(req *MoveDoneArgs, resp *MoveDoneReply) {
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
 	atomic.StoreInt32(&kv.dead, 1)
-	kv.lock()
-	defer kv.unlock()
-	debugf(KILL, kv.me, kv.gid, "state: %v", toJson(kv))
+	// kv.applySnapshot(kv.dumpData())
+	debugf(KILL, kv.me, kv.gid, "")
 }
 func (kv *ShardKV) killed() bool {
 	ret := atomic.LoadInt32(&kv.dead)
@@ -267,6 +276,8 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	labgob.Register(&MoveDoneArgs{})
 	labgob.Register(&MoveShardArgs{})
 	labgob.Register(shardctrler.Config{})
+	labgob.Register(Shard{})
+	labgob.Register(&CallDoneArgs{})
 
 	kv := new(ShardKV)
 	kv.me = me
@@ -293,7 +304,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	go kv.applyMsgForStateMachine()
 	go kv.UpdateConfig()
 	go kv.checkAndSendShard()
-	logger.Infof("start [G%v][S%v], state: %v", gid, kv.me, toJson(kv))
+	// logger.Infof("start [G%v][S%v], state: %v", gid, kv.me, toJson(kv))
 	return kv
 }
 

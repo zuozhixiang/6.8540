@@ -53,7 +53,7 @@ type GetReply struct {
 type MoveShardArgs struct {
 	ID          int64
 	ShardID     int
-	Data        *Shard
+	Data        Shard
 	ShardConfig shardctrler.Config
 	FromGID     int
 	Me          int
@@ -65,7 +65,7 @@ type MoveShardReply struct {
 
 type Shard struct {
 	Data        map[string]string
-	Executed    map[int64]bool
+	Executed    map[int64]struct{}
 	VersionData map[int64]string
 }
 
@@ -78,5 +78,14 @@ type MoveDoneArgs struct {
 	ShardID int
 }
 type MoveDoneReply struct {
+	Err string
+}
+
+type CallDoneArgs struct {
+	ID      int64
+	ShardID int
+}
+
+type CallDoneReply struct {
 	Err string
 }

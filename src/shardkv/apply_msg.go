@@ -9,8 +9,12 @@ import (
 
 func (kv *ShardKV) StartAndWaitRes(op Op) (res Result) {
 	ch := make(chan Result, 1)
+	index, _, isleader := kv.rf.Start(op)
+	if !isleader {
+		res.Err = ErrWrongLeader
+		return
+	}
 	kv.lock()
-	index, _, _ := kv.rf.Start(op)
 	kv.done[index] = &ch
 	kv.unlock()
 	res.Err = OK
@@ -37,30 +41,60 @@ func (kv *ShardKV) executeOp(op *Op) (res Result) {
 		{
 			req := op.Data.(*PutAppendArgs)
 			shardID := key2shard(req.Key)
-			shard := kv.ShardData[shardID]
-			if !shard.Executed[op.ID] {
-				shard.Executed[op.ID] = true
-				shard.Data[req.Key] = req.Value
+			if kv.AllShardState[shardID] == Serving {
+				shard := kv.ShardData[shardID]
+				if _, ok := shard.Executed[op.ID]; !ok {
+					shard.Executed[op.ID] = struct{}{}
+					shard.Data[req.Key] = req.Value
+				}
+				return
 			}
+			if kv.AllShardState[shardID] == Pulling {
+				res.Err = ErrShardNoReady
+				return
+			}
+			res.Err = ErrWrongGroup
 		}
 	case AppendType:
 		{
 			req := op.Data.(*PutAppendArgs)
 			shardID := key2shard(req.Key)
-			shard := kv.ShardData[shardID]
-			if !shard.Executed[op.ID] {
-				shard.Executed[op.ID] = true
-				shard.Data[req.Key] += req.Value
+			shardState := kv.AllShardState[shardID]
+			if shardState == Serving {
+				shard := kv.ShardData[shardID]
+				if _, ok := shard.Executed[op.ID]; !ok {
+					shard.Executed[op.ID] = struct{}{}
+					shard.Data[req.Key] += req.Value
+				}
+				return
 			}
+			if kv.AllShardState[shardState] == Pulling {
+				res.Err = ErrShardNoReady
+				return
+			}
+			res.Err = ErrWrongGroup
 		}
 	case GetType:
 		{
 			req := op.Data.(*GetArgs)
 			shardID := key2shard(req.Key)
-			shard := kv.ShardData[shardID]
-			shard.Executed[op.ID] = true
-			shard.VersionData[op.ID] = shard.Data[req.Key]
-			res.Value = shard.Data[req.Key]
+			shardState := kv.AllShardState[shardID]
+			if shardState == Serving {
+				shard := kv.ShardData[shardID]
+				if _, ok := shard.Executed[req.ID]; ok {
+					res.Value = shard.VersionData[req.ID]
+				} else {
+					shard.Executed[req.ID] = struct{}{}
+					shard.VersionData[req.ID] = shard.Data[req.Key]
+					res.Value = shard.Data[req.Key]
+				}
+				return
+			}
+			if shardState == Pulling {
+				res.Err = ErrShardNoReady
+				return
+			}
+			res.Err = ErrWrongGroup
 		}
 	case SyncConfigType:
 		{
@@ -102,7 +136,7 @@ func (kv *ShardKV) executeOp(op *Op) (res Result) {
 			req := op.Data.(*MoveShardArgs)
 			if req.ShardConfig.Num < kv.ShardConfig.Num {
 				debugf(GetShard, kv.me, kv.gid, "warn old version, old: %v, self: %v", req.ShardConfig.Num, kv.ShardConfig.Num)
-				res.Err = ErrOldVersion
+				res.Err = OK
 				return
 			}
 			if req.ShardConfig.Num > kv.ShardConfig.Num {
@@ -115,7 +149,9 @@ func (kv *ShardKV) executeOp(op *Op) (res Result) {
 				return
 			}
 			kv.ShardData[req.ShardID] = req.Data
-			go kv.sendMoveDone(req.ID, kv.ShardConfig.Groups[req.FromGID], kv.me, req.ShardID)
+			kv.HoldNormalShards[req.ShardID] = true
+			kv.AllShardState[req.ShardID] = Serving
+			// go kv.sendMoveDone(req.ID, kv.ShardConfig.Groups[req.FromGID], kv.me, req.ShardID)
 		}
 	case MoveDoneType:
 		{
@@ -131,7 +167,23 @@ func (kv *ShardKV) executeOp(op *Op) (res Result) {
 				return
 			}
 			kv.AllShardState[shardID] = NoSelf
-			kv.ShardData[shardID] = nil
+			kv.ShardData[shardID] = Shard{}
+		}
+	case DeleteType:
+		{
+			req := op.Data.(*CallDoneArgs)
+			sharsState := kv.AllShardState[req.ShardID]
+			if sharsState == Serving {
+				delete(kv.ShardData[req.ShardID].Executed, req.ID)
+				delete(kv.ShardData[req.ShardID].VersionData, req.ID)
+				return
+			}
+			if sharsState == Pulling {
+				res.Err = ErrShardNoReady
+				return
+			}
+			debugf(Method("test"), kv.me, kv.gid, "state: %v", toJson(kv.AllShardState))
+			res.Err = ErrWrongGroup
 		}
 	default:
 		panic("illegal type")
@@ -151,6 +203,9 @@ var opmap = map[OpType]Method{
 
 func (kv *ShardKV) applyMsgForStateMachine() {
 	for msg := range kv.applyCh {
+		if kv.killed() {
+			return
+		}
 		kv.lock()
 		lastApplied := kv.lastAppliedIndex
 		if msg.CommandValid {
