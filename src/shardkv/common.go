@@ -37,7 +37,7 @@ type PutAppendArgs struct {
 }
 
 type PutAppendReply struct {
-	Err Err
+	Err string
 }
 
 type GetArgs struct {
@@ -46,19 +46,37 @@ type GetArgs struct {
 }
 
 type GetReply struct {
-	Err   Err
+	Err   string
 	Value string
 }
 
 type MoveShardArgs struct {
 	ID          int64
-	Shard       int
-	ShardData   map[string]string
-	VersionData map[int64]string
-	Executed    map[int64]bool
+	ShardID     int
+	Data        *Shard
 	ShardConfig shardctrler.Config
+	FromGID     int
+	Me          int
 }
 
 type MoveShardReply struct {
-	Err Err
+	Err string
+}
+
+type Shard struct {
+	Data        map[string]string
+	Executed    map[int64]bool
+	VersionData map[int64]string
+}
+
+type Result struct {
+	Err   string
+	Value string
+}
+type MoveDoneArgs struct {
+	ID      int64
+	ShardID int
+}
+type MoveDoneReply struct {
+	Err string
 }

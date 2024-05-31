@@ -10,7 +10,6 @@ import (
 	"os"
 	"reflect"
 	"runtime"
-	"sync"
 	"time"
 )
 
@@ -68,6 +67,8 @@ const (
 	Config       Method = "GetConfig"
 	SendShard    Method = "SendShard"
 	GetShard     Method = "GetShard"
+
+	MoveDoneM Method = "MoveDone"
 )
 
 var Len int
@@ -90,15 +91,13 @@ func debugf(meth Method, me int, gid int, format string, a ...interface{}) {
 	}
 }
 
-func startTimeout(cond *sync.Cond, timeoutChan chan bool) {
-	timeout := time.After(600 * time.Millisecond)
-	select {
-	case <-timeout:
-		{
-			timeoutChan <- true
-			cond.Broadcast()
-		}
+func NewShard() *Shard {
+	res := Shard{
+		Data:        map[string]string{},
+		Executed:    map[int64]bool{},
+		VersionData: map[int64]string{},
 	}
+	return &res
 }
 
 // Interface for delegating copy process to type

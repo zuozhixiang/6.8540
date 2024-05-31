@@ -3,7 +3,6 @@ package shardkv
 import (
 	"6.5840/labrpc"
 	"6.5840/shardctrler"
-	"fmt"
 	"sync/atomic"
 )
 import "6.5840/raft"
@@ -19,7 +18,7 @@ const (
 	DeleteType
 	SyncConfigType
 	MoveShardType
-	MoveDone
+	MoveDoneType
 )
 
 type ShardState int
@@ -39,14 +38,9 @@ type ShardData struct {
 }
 
 type Op struct {
-	ID               int64
-	Type             OpType
-	Key              string
-	Value            string
-	NeedRemoveShards []int // need remove shards
-	NeedAddShards    []int
-	Config           shardctrler.Config
-	ShardData        *ShardData
+	ID   int64
+	Type OpType
+	Data any
 }
 
 type ShardKV struct {
@@ -60,25 +54,34 @@ type ShardKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	dead        int32
-	Data        [shardctrler.NShards]map[string]string
-	Executed    [shardctrler.NShards]map[int64]bool
-	VersionData [shardctrler.NShards]map[int64]string
+	dead int32
+
+	ShardData [shardctrler.NShards]*Shard
 
 	lastAppliedIndex int
-	cond             *sync.Cond
 	persiter         *raft.Persister
 	mck              *shardctrler.Clerk
 	ShardConfig      shardctrler.Config
 	HoldNormalShards map[int]bool // now hold on serving shards
 	AllShardState    [shardctrler.NShards]ShardState
+	done             map[int]*chan Result
 }
 
 func (kv *ShardKV) lock() {
+	//if kv.isLeader() {
+	//	_, file, line, _ := runtime.Caller(1)
+	//	pos := fmt.Sprintf("%v:%v", file[Len:], line)
+	//	debugf(Method("lock"), kv.me, kv.gid, "lock: pos: %v", pos)
+	//}
 	kv.mu.Lock()
 }
 
 func (kv *ShardKV) unlock() {
+	//if kv.isLeader() {
+	//	_, file, line, _ := runtime.Caller(1)
+	//	pos := fmt.Sprintf("%v:%v", file[Len:], line)
+	//	debugf(Method("unlock"), kv.me, kv.gid, "unlock: pos: %v", pos)
+	//}
 	kv.mu.Unlock()
 }
 
@@ -86,184 +89,130 @@ func (kv *ShardKV) isLeader() bool {
 	_, ret := kv.rf.GetState()
 	return ret
 }
-
-func (kv *ShardKV) checkShard(shard int) bool {
-	_, ok := kv.HoldNormalShards[shard]
-	return ok
+func (kv *ShardKV) checkShardState(shardID int) string {
+	kv.lock()
+	defer kv.unlock()
+	if kv.AllShardState[shardID] == Serving {
+		return OK
+	}
+	if kv.AllShardState[shardID] == Pulling {
+		return ErrShardNoReady
+	}
+	return ErrWrongGroup
 }
-
-func (kv *ShardKV) checkExecuted(id int64, shard int) bool {
-	_, ok := kv.Executed[shard][id]
-	return ok
+func (kv *ShardKV) checkLeaderAndShard(shardID int) string {
+	if !kv.isLeader() {
+		return ErrWrongLeader
+	}
+	return kv.checkShardState(shardID)
 }
 
 func (kv *ShardKV) Get(req *GetArgs, resp *GetReply) {
-	if kv.killed() {
-		return
-	}
-
 	m := GetMethod
+	shardID := key2shard(req.Key)
+	resp.Err = kv.checkShardState(shardID)
+	if resp.Err != OK {
+		return
+	}
+	op := Op{
+		ID:   req.ID,
+		Data: req,
+		Type: GetType,
+	}
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
+	resp.Value = res.Value
+	if resp.Err == OK {
+		debugf(m, kv.me, kv.gid, "success req: %v, value: %v", toJson(req), resp.Value)
+	} else {
+		debugf(m, kv.me, kv.gid, "fail req: %v, resp: %v ", toJson(req), toJson(resp))
+	}
+}
 
-	if !kv.isLeader() {
-		debugf(m, kv.me, kv.gid, "id: %v, not leader", req.ID)
-		resp.Err = ErrWrongLeader
-		return
+func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
+	m := PutMethod
+	opType := PutType
+	if req.Op == "Append" {
+		m = AppendMethod
+		opType = AppendType
 	}
-	kv.lock()
-	defer kv.unlock()
-	shard := key2shard(req.Key)
-	shardState := kv.AllShardState[shard]
-	if shardState == NoSelf || shardState == Pushing {
-		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v, wrong leader", req.ID)
-		return
-	}
-	if shardState == Pulling {
-		resp.Err = ErrShardNoReady
-		debugf(m, kv.me, kv.gid, "id: %v, shard wait pull", req.ID)
-		return
-	}
-
-	resp.Err = OK
-	if kv.checkExecuted(req.ID, shard) {
-		if _, ok := kv.VersionData[shard][req.ID]; !ok {
-			panic(req.ID)
-		}
-		resp.Value = kv.VersionData[shard][req.ID]
-		debugf(m, kv.me, kv.gid, "Executed, id: %v", req.ID)
+	shardID := key2shard(req.Key)
+	resp.Err = kv.checkShardState(shardID)
+	if resp.Err != OK {
 		return
 	}
 
 	op := Op{
 		ID:   req.ID,
-		Key:  req.Key,
-		Type: GetType,
+		Data: req,
+		Type: opType,
 	}
-
-	index, term, isLeader := kv.rf.Start(op)
-	if !isLeader {
-		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
+	if resp.Err == OK {
+		debugf(m, kv.me, kv.gid, "success req: %v", toJson(req))
+	} else {
+		debugf(m, kv.me, kv.gid, "fail req: %v, resp: %v ", toJson(req), toJson(resp))
 	}
-	debugf(m, kv.me, kv.gid, "req: %v, index: %v, term:%v", toJson(req), index, term)
-
-	timeoutChan := make(chan bool, 1)
-	go startTimeout(kv.cond, timeoutChan)
-	timeout := false
-	for !(index <= kv.lastAppliedIndex) && !timeout {
-		select {
-		case <-timeoutChan:
-			timeout = true
-		default:
-			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
-		}
-	}
-	if !kv.checkShard(shard) {
-		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.HoldNormalShards))
-		return
-	}
-	if !kv.isLeader() {
-		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
-	}
-	if timeout {
-		resp.Err = ErrTimeout
-		debugf(m, kv.me, kv.gid, "timeout!, req: %v", toJson(req))
-		return
-	}
-	if _, ok := kv.VersionData[shard][op.ID]; !ok {
-		errMsg := fmt.Sprintf("shard: %v, req:%v, id: %v", shard, toJson(req), op.ID)
-		panic(errMsg)
-	}
-	res := kv.VersionData[shard][op.ID]
-	if res == "" {
-		debugf(m, kv.me, kv.gid, "warning, req:%v", toJson(req))
-	}
-	debugf(m, kv.me, kv.gid, "success, req: %v, value: %v", toJson(req), res)
-	resp.Value = res
 }
 
-func (kv *ShardKV) PutAppend(req *PutAppendArgs, resp *PutAppendReply) {
-	// Your code here.
-	if kv.killed() {
-		return
-	}
-	m := PutMethod
-	if req.Op == "Append" {
-		m = AppendMethod
-	}
+func (kv *ShardKV) MoveShard(req *MoveShardArgs, resp *MoveShardReply) {
+	m := GetShard
 	if !kv.isLeader() {
-		debugf(m, kv.me, kv.gid, "id: %v, not leader", req.ID)
 		resp.Err = ErrWrongLeader
+		debugf(m, kv.me, kv.gid, "not leader, id: %v", req.ID)
 		return
 	}
 	kv.lock()
-	defer kv.unlock()
-	shard := key2shard(req.Key)
-	shardState := kv.AllShardState[shard]
-	if shardState == NoSelf || shardState == Pushing {
-		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v, wrong leader", req.ID)
+	newConfig := &req.ShardConfig
+	if newConfig.Num < kv.ShardConfig.Num {
+		resp.Err = ErrOldVersion
+		debugf(m, kv.me, kv.gid, "err old verion, req: %v", req.ID)
+		kv.unlock()
 		return
 	}
-	if shardState == Pulling {
-		resp.Err = ErrShardNoReady
-		debugf(m, kv.me, kv.gid, "id: %v, shard wait pull", req.ID)
+	if newConfig.Num > kv.ShardConfig.Num {
+		resp.Err = ErrWaiting
+		debugf(m, kv.me, kv.gid, "need wait req: %v", req.ID)
+		kv.unlock()
 		return
 	}
+	kv.unlock()
 	resp.Err = OK
-	if kv.checkExecuted(req.ID, shard) {
-		debugf(m, kv.me, kv.gid, "Executed, id: %v", req.ID)
-		return
-	}
-
 	op := Op{
-		ID:    req.ID,
-		Type:  PutType,
-		Key:   req.Key,
-		Value: req.Value,
+		ID:   req.ID,
+		Type: MoveShardType,
+		Data: req,
 	}
-	if m == AppendMethod {
-		op.Type = AppendType
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
+	if resp.Err == OK {
+		debugf(m, kv.me, kv.gid, "success req: %v", toJson(req))
+	} else {
+		debugf(m, kv.me, kv.gid, "fail req: %v, resp: %v ", toJson(req), toJson(resp))
 	}
-	debugf(m, kv.me, kv.gid, "start, id: %v", req.ID)
-	index, term, isLeader := kv.rf.Start(op)
-	if !isLeader {
-		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
-		resp.Err = ErrWrongLeader
-		return
-	}
-	debugf(m, kv.me, kv.gid, "req: %v, index: %v, term:%v", toJson(req), index, term)
-	timeoutChan := make(chan bool, 1)
-	go startTimeout(kv.cond, timeoutChan)
-	timeout := false
-	for !(index <= kv.lastAppliedIndex) && !timeout {
-		select {
-		case <-timeoutChan:
-			timeout = true // timeout notify, raft can not do a agreement
-		default:
-			kv.cond.Wait() // wait, must hold mutex, after blocked, release lock
-		}
-	}
-	if !kv.checkShard(shard) {
-		resp.Err = ErrWrongGroup
-		debugf(m, kv.me, kv.gid, "id: %v,shard: %v, Wrong Group, shards:%v", req.ID, shard, toJson(kv.HoldNormalShards))
-		return
-	}
+	return
+}
+
+func (kv *ShardKV) MoveDone(req *MoveDoneArgs, resp *MoveDoneReply) {
+	m := MoveDoneM
 	if !kv.isLeader() {
-		debugf(m, kv.me, kv.gid, "not leader, req: %v", toJson(req))
+		debugf(m, kv.me, kv.gid, "no leader, id: %v", req.ID)
 		resp.Err = ErrWrongLeader
 		return
 	}
-	if timeout {
-		resp.Err = ErrTimeout
-		debugf(m, kv.me, kv.gid, "timeout!, req: %v", toJson(req))
-		return
+	op := Op{
+		ID:   req.ID,
+		Data: req,
+		Type: MoveDoneType,
 	}
-	debugf(m, kv.me, kv.gid, "success, req:%v", toJson(req))
+	res := kv.StartAndWaitRes(op)
+	resp.Err = res.Err
+	if resp.Err == OK {
+		debugf(m, kv.me, kv.gid, "success req: %v", toJson(req))
+	} else {
+		debugf(m, kv.me, kv.gid, "fail req: %v, resp: %v ", toJson(req), toJson(resp))
+	}
 }
 
 // the tester calls Kill() when a ShardKV instance won't
@@ -275,8 +224,6 @@ func (kv *ShardKV) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.lock()
 	defer kv.unlock()
-	dumps := kv.dumpData()
-	kv.rf.Snapshot(kv.lastAppliedIndex, dumps)
 	debugf(KILL, kv.me, kv.gid, "state: %v", toJson(kv))
 }
 func (kv *ShardKV) killed() bool {
@@ -315,6 +262,11 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
+	labgob.Register(&PutAppendArgs{})
+	labgob.Register(&GetArgs{})
+	labgob.Register(&MoveDoneArgs{})
+	labgob.Register(&MoveShardArgs{})
+	labgob.Register(shardctrler.Config{})
 
 	kv := new(ShardKV)
 	kv.me = me
@@ -328,23 +280,17 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// Use something like this to talk to the shardctrler:
 	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
 	kv.dead = 0
-	for i := 0; i < shardctrler.NShards; i++ {
-		kv.Data[i] = map[string]string{}
-		kv.Executed[i] = map[int64]bool{}
-		kv.VersionData[i] = map[int64]string{}
-	}
+
 	kv.lastAppliedIndex = 0
-	kv.cond = sync.NewCond(&kv.mu)
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
 	kv.persiter = persister
-	kv.ClearShardState()
-	kv.HoldNormalShards = map[int]bool{}
+	kv.HoldNormalShards = make(map[int]bool)
 	kv.applySnapshot(persister.ReadSnapshot())
+	kv.done = make(map[int]*chan Result, 100)
 
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.applyMsgForStateMachine()
-	go kv.dectionMaxSize()
 	go kv.UpdateConfig()
 	go kv.checkAndSendShard()
 	logger.Infof("start [G%v][S%v], state: %v", gid, kv.me, toJson(kv))

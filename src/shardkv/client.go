@@ -109,13 +109,13 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 					break
 				}
 				if ok && reply.Err == ErrShardNoReady {
-					time.Sleep(100 * time.Millisecond)
+					time.Sleep(50 * time.Millisecond)
 					si-- // continue to request this srv
 				}
 				// ... not ok, or ErrWrongLeader
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(70 * time.Millisecond)
 		// ask controller for the latest configuration.
 		ck.config = ck.sm.Query(-1)
 	}

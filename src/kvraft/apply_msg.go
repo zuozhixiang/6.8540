@@ -14,7 +14,6 @@ func (kv *KVServer) executeOp(op *Op) (res Result) {
 				req := op.Data.(*PutAppendArgs)
 				kv.executed[op.ID] = true
 				kv.data[req.Key] = req.Value
-			} else {
 			}
 		}
 	case AppendType:
@@ -22,8 +21,7 @@ func (kv *KVServer) executeOp(op *Op) (res Result) {
 			if !kv.executed[op.ID] {
 				req := op.Data.(*PutAppendArgs)
 				kv.executed[op.ID] = true
-				kv.data[req.Key] = kv.data[req.Key] + req.Value
-			} else {
+				kv.data[req.Key] += req.Value
 			}
 		}
 	case GetType:

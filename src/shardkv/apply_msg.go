@@ -2,154 +2,190 @@ package shardkv
 
 import (
 	"6.5840/raft"
+	"6.5840/shardctrler"
 	"fmt"
+	"time"
 )
 
-func (kv *ShardKV) executeOp(op Op, shard int) string {
+func (kv *ShardKV) StartAndWaitRes(op Op) (res Result) {
+	ch := make(chan Result, 1)
+	kv.lock()
+	index, _, _ := kv.rf.Start(op)
+	kv.done[index] = &ch
+	kv.unlock()
+	res.Err = OK
+	select {
+	case r := <-ch:
+		{
+			res = r
+		}
+	case <-time.After(600 * time.Millisecond):
+		{
+			res.Err = ErrTimeout
+		}
+	}
+	kv.lock()
+	delete(kv.done, index)
+	kv.unlock()
+	return
+}
+
+func (kv *ShardKV) executeOp(op *Op) (res Result) {
+	res.Err = OK
 	switch op.Type {
 	case PutType:
 		{
-			shard := key2shard(op.Key)
-			kv.Executed[shard][op.ID] = true
-			kv.Data[shard][op.Key] = op.Value
-			return op.Value
+			req := op.Data.(*PutAppendArgs)
+			shardID := key2shard(req.Key)
+			shard := kv.ShardData[shardID]
+			if !shard.Executed[op.ID] {
+				shard.Executed[op.ID] = true
+				shard.Data[req.Key] = req.Value
+			}
 		}
 	case AppendType:
 		{
-			shard := key2shard(op.Key)
-			kv.Executed[shard][op.ID] = true
-			kv.Data[shard][op.Key] = kv.Data[shard][op.Key] + op.Value
-			return kv.Data[shard][op.Key]
+			req := op.Data.(*PutAppendArgs)
+			shardID := key2shard(req.Key)
+			shard := kv.ShardData[shardID]
+			if !shard.Executed[op.ID] {
+				shard.Executed[op.ID] = true
+				shard.Data[req.Key] += req.Value
+			}
 		}
 	case GetType:
 		{
-			shard := key2shard(op.Key)
-			kv.Executed[shard][op.ID] = true
-			kv.VersionData[shard][op.ID] = kv.Data[shard][op.Key]
-			return kv.Data[shard][op.Key]
+			req := op.Data.(*GetArgs)
+			shardID := key2shard(req.Key)
+			shard := kv.ShardData[shardID]
+			shard.Executed[op.ID] = true
+			shard.VersionData[op.ID] = shard.Data[req.Key]
+			res.Value = shard.Data[req.Key]
 		}
 	case SyncConfigType:
 		{
-			// need to do
-			newConfig := &op.Config
-			if newConfig.Num == kv.ShardConfig.Num {
-				debugf(Method("SyncConfigType"), kv.me, kv.gid, "get old config: %v, self: %v", toJson(newConfig), toJson(kv.ShardConfig))
-				return ""
+			newConfig := op.Data.(shardctrler.Config)
+			if newConfig.Num < kv.ShardConfig.Num {
+				debugf(Config, kv.me, kv.gid, "warn old version, old: %v, self: %v", newConfig.Num, kv.ShardConfig.Num)
+				return
 			}
-			oldConfig := &kv.ShardConfig
+			if newConfig.Num == kv.ShardConfig.Num {
+				return
+			}
+			oldConfig := kv.ShardConfig
 			add, remove := getAddAndRemove(oldConfig.Shards, newConfig.Shards, kv.gid)
+			kv.ShardConfig = newConfig
 			if newConfig.Num == 1 {
 				if len(remove) > 0 {
-					panic("not empty")
+					logger.Panicf("[S%v][G%v] old: %v, new: %v", toJson(kv.ShardConfig), toJson(newConfig))
+					return
 				}
-				for _, shard := range add {
-					kv.AllShardState[shard] = Serving
-					kv.HoldNormalShards[shard] = true
+				for _, shardID := range add {
+					kv.AllShardState[shardID] = Serving
+					kv.ShardData[shardID] = NewShard()
+					kv.HoldNormalShards[shardID] = true
 				}
-				return ""
+				debugf(Config, kv.me, kv.gid, "old Config: %v, new Config: %v, add: %v, remove: %v", toJson(oldConfig), toJson(newConfig), toJson(add), toJson(remove))
+				return
 			}
-			// calaculate change config
-			for _, shard := range add {
-				kv.AllShardState[shard] = Pulling
-				delete(kv.HoldNormalShards, shard)
+			for _, shardID := range add {
+				kv.AllShardState[shardID] = Pulling
 			}
-			for _, shard := range remove {
-				kv.AllShardState[shard] = Pushing
-				delete(kv.HoldNormalShards, shard)
+			for _, shardID := range remove {
+				kv.AllShardState[shardID] = Pushing
+				delete(kv.HoldNormalShards, shardID)
 			}
-
+			debugf(Config, kv.me, kv.gid, "old Config: %v, new Config: %v, add: %v, remove: %v", toJson(oldConfig), toJson(newConfig), toJson(add), toJson(remove))
 		}
 	case MoveShardType:
 		{
-			shardData := op.ShardData
-			if op.Config.Num < kv.ShardConfig.Num {
-				panic("old")
+			req := op.Data.(*MoveShardArgs)
+			if req.ShardConfig.Num < kv.ShardConfig.Num {
+				debugf(GetShard, kv.me, kv.gid, "warn old version, old: %v, self: %v", req.ShardConfig.Num, kv.ShardConfig.Num)
+				res.Err = ErrOldVersion
+				return
 			}
-			if op.Config.Num > kv.ShardConfig.Num {
-				panic("new")
+			if req.ShardConfig.Num > kv.ShardConfig.Num {
+				debugf(GetShard, kv.me, kv.gid, "warn new version, old: %v, self: %v", req.ShardConfig.Num, kv.ShardConfig.Num)
+				res.Err = ErrWaiting
+				return
 			}
-			shard := shardData.Shard
-			if kv.AllShardState[shard] == Serving {
-				debugf(Method("ApplyShard"), kv.me, kv.gid, "repeat ")
-				return ""
+			if kv.AllShardState[req.ShardID] == Serving {
+				debugf(GetShard, kv.me, kv.gid, "warn already get, shard: %v, id: %v", req.ShardID, req.ID)
+				return
 			}
-			if kv.AllShardState[shard] != Pulling {
-				panic("illegal state")
-			}
-
+			kv.ShardData[req.ShardID] = req.Data
+			go kv.sendMoveDone(req.ID, kv.ShardConfig.Groups[req.FromGID], kv.me, req.ShardID)
 		}
-	case MoveDone:
+	case MoveDoneType:
 		{
-			shardData := op.ShardData
-			kv.AllShardState[shard] = Serving
-			kv.Data[shard] = shardData.Data
-			kv.Executed[shard] = shardData.Executed
-			kv.VersionData[shard] = shardData.VersionData
-		}
-	case DeleteType:
-		{
-			//delete(kv.Executed, op.Key)
-			//delete(kv.VersionData, op.Key)
-			// delete(kv.Executedlist, op.ID)
+			req := op.Data.(*MoveDoneArgs)
+			shardID := req.ShardID
+			state := kv.AllShardState[shardID]
+			if state == Serving || state == Pulling {
+				logger.Panicf("illegal! id: %v", req.ID)
+				return
+			}
+			if state == NoSelf {
+				debugf(MoveDoneM, kv.me, kv.gid, "warn already noself, id: %v", req.ID)
+				return
+			}
+			kv.AllShardState[shardID] = NoSelf
+			kv.ShardData[shardID] = nil
 		}
 	default:
-		panic("illegal op type")
+		panic("illegal type")
 	}
-	return ""
+	return
 }
 
-var opmap = map[OpType]string{
-	GetType:        string(GetMethod),
-	PutType:        string(PutMethod),
-	AppendType:     string(AppendMethod),
-	SyncConfigType: "SyncConfig",
+var opmap = map[OpType]Method{
+	GetType:        (GetMethod),
+	PutType:        (PutMethod),
+	AppendType:     (AppendMethod),
 	DeleteType:     "Delete",
-}
-
-func formatCmd(op Op) string {
-	return fmt.Sprintf("[%v][%v][Key: %v][Value: %v]", op.ID, opmap[op.Type], op.Key, op.Value)
+	SyncConfigType: Config,
+	MoveShardType:  GetShard,
+	MoveDoneType:   MoveDoneM,
 }
 
 func (kv *ShardKV) applyMsgForStateMachine() {
-	for {
-		msg := <-kv.applyCh
-		needApplyMsg := []raft.ApplyMsg{msg}
-		size := len(kv.applyCh)
-		for i := 0; i < size; i++ {
-			needApplyMsg = append(needApplyMsg, <-kv.applyCh)
-		}
+	for msg := range kv.applyCh {
 		kv.lock()
 		lastApplied := kv.lastAppliedIndex
-		for _, msg := range needApplyMsg {
-			if msg.CommandValid {
-				if msg.CommandIndex <= lastApplied {
-					errmsg := fmt.Sprintf("[S%v][G%v], msg index: %v, lastApplied: %v, msg: %v", kv.me, kv.gid, msg.CommandIndex, lastApplied, msg)
-					panic(errmsg)
-				}
-				lastApplied = msg.CommandIndex
-				op := msg.Command.(Op)
-				shard := key2shard(op.Key)
-
-				if op.Type == MoveShardType {
-
-				} else if op.Type != SyncConfigType && (!kv.checkShard(shard) || kv.checkExecuted(op.ID, shard)) {
-					continue
-				}
-				res := kv.executeOp(op, shard)
-				op.Value = res
-				debugf(Apply, kv.me, kv.gid, "idx: %v, %v", msg.CommandIndex, formatCmd(op))
-			} else {
-				if msg.SnapshotIndex <= lastApplied {
-					errmsg := fmt.Sprintf("[S%v][G%v], snapshot index: %v, lastApplied: %v, msg: %v", kv.me, kv.gid, msg.SnapshotIndex, lastApplied, raft.GetPrintMsg([]raft.ApplyMsg{msg}))
-					panic(errmsg)
-				}
-				lastApplied = msg.SnapshotIndex
-				kv.applySnapshot(msg.Snapshot)
-				debugf(AppSnap, kv.me, kv.gid, "snapIndex: %v, snapTerm: %v", msg.SnapshotIndex, msg.SnapshotTerm)
+		if msg.CommandValid {
+			if msg.CommandIndex <= lastApplied {
+				errmsg := fmt.Sprintf("[S%v], msg index: %v, lastApplied: %v, msg: %v", kv.me, msg.CommandIndex, lastApplied, msg)
+				panic(errmsg)
 			}
+			lastApplied = msg.CommandIndex
+			op := msg.Command.(Op)
+			res := kv.executeOp(&op)
+			debugf("Aly"+opmap[op.Type], kv.me, kv.gid, "idx: %v, id: \"%v\", res: %v", lastApplied, op.ID, toJson(res))
+			kv.lastAppliedIndex = lastApplied
+			if kv.isLeader() {
+				ch, ok := kv.done[lastApplied]
+				if ok {
+					*ch <- res
+				}
+			}
+			size := kv.persiter.RaftStateSize()
+			if kv.maxraftstate != -1 && size >= kv.maxraftstate {
+				dumps := kv.dumpData()
+				kv.rf.Snapshot(kv.lastAppliedIndex, dumps)
+				debugf(MakeSnap, kv.me, kv.gid, "%v > %v, lastApplied: %v, newsize: %v", size, kv.maxraftstate, kv.lastAppliedIndex, kv.persiter.RaftStateSize())
+			}
+			kv.unlock()
+		} else {
+			if msg.SnapshotIndex <= lastApplied {
+				errmsg := fmt.Sprintf("[S%v], snapshot index: %v, lastApplied: %v, msg: %v", kv.me, msg.SnapshotIndex, lastApplied, raft.GetPrintMsg([]raft.ApplyMsg{msg}))
+				panic(errmsg)
+			}
+			lastApplied = msg.SnapshotIndex
+			kv.applySnapshot(msg.Snapshot)
+			kv.lastAppliedIndex = lastApplied
+			debugf(AppSnap, kv.me, kv.gid, "snapIndex: %v, snapTerm: %v", msg.SnapshotIndex, msg.SnapshotTerm)
+			kv.unlock()
 		}
-		kv.lastAppliedIndex = lastApplied
-		kv.cond.Broadcast()
-		kv.unlock()
 	}
 }

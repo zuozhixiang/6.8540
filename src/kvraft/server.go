@@ -52,7 +52,7 @@ func (kv *KVServer) lock() {
 func (kv *KVServer) unlock() {
 	//_, file, line, _ := runtime.Caller(1)
 	//pos := fmt.Sprintf("%v:%v", file[Len:], line)
-	//debugf(Method("unlock"), kv.me, "lock: pos: %v", pos)
+	//debugf(Method("unlock"), kv.me, "unlock: pos: %v", pos)
 	kv.mu.Unlock()
 }
 
