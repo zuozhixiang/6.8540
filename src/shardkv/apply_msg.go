@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// submit request to raft and wait raft return
 func (kv *ShardKV) StartAndWaitRes(op Op) (res Result) {
 	ch := make(chan Result, 1)
 	index, _, isleader := kv.rf.Start(op)
@@ -34,6 +35,7 @@ func (kv *ShardKV) StartAndWaitRes(op Op) (res Result) {
 	return
 }
 
+// execute command
 func (kv *ShardKV) executeOp(op *Op) (res Result) {
 	res.Err = OK
 	switch op.Type {
